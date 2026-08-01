@@ -47,7 +47,7 @@ PTeeHealth/
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── page.tsx                  # placeholder root page (landing screen not built)
+│   │   │   ├── page.tsx                  # Home / hero "tap to begin" landing screen
 │   │   │   ├── layout.tsx
 │   │   │   ├── globals.css               # Tailwind v4 tokens (default shadcn palette — not yet swapped for Lovable's real tokens)
 │   │   │   └── assessment/
@@ -55,6 +55,9 @@ PTeeHealth/
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   └── top-nav.tsx
+│   │   │   ├── home/
+│   │   │   │   ├── hero-section.tsx       # rotating headline/badge + mic entry point (routes to /assessment)
+│   │   │   │   └── quick-actions-bar.tsx  # fixed bottom pill (crop/type/draw/chat icons, visual-only)
 │   │   │   ├── assessment/
 │   │   │   │   ├── assessment-tabs.tsx
 │   │   │   │   ├── patient-summary-card.tsx
@@ -79,6 +82,12 @@ PTeeHealth/
 ## Features Implemented
 
 - **Project scaffold**: Next.js + Tailwind + shadcn/ui frontend; FastAPI backend skeleton with env-configurable CORS (`ALLOWED_ORIGINS`).
+- **Home / hero screen** (`/`), pixel-matched from Lovable reference screenshots:
+  - Shared `TopNav` with "New Patients" now pointing at `/` (was `/assessment`)
+  - Rotating headline + achievement badge (`hero-section.tsx`) cycling every 4s between two mock variants ("decisions" / 12+ years of know-how and "tracking" / 50,000+ sessions reasoned through), matching both reference screenshot states
+  - Large circular mic button that routes to `/assessment` via `next/link` — the "tap to begin assessment" entry point
+  - "Start here" instruction copy
+  - Fixed bottom quick-actions pill (`quick-actions-bar.tsx`) with crop/type/draw/chat icon buttons, visual-only (no backing behavior yet, consistent with other visual-only affordances already in the Assessment screen)
 - **Patient Intake / Assessment screen** (`/assessment`), pixel-matched from Lovable reference screenshots:
   - Top nav (logo, New Patients/Existing Patients/Dashboard, search, notifications, AI icon, avatar)
   - Assessment/Treatment/Home Plan/Evaluation tab strip + "Senior review" pill
@@ -93,7 +102,7 @@ PTeeHealth/
 | Screen | Status |
 |---|---|
 | Patient Intake / Assessment tab (`/assessment`) | ✅ Built, pixel-matched |
-| Landing / "tap to begin assessment" mic screen | ❌ Not built (reference screenshot only) |
+| Landing / "tap to begin assessment" mic screen (`/`) | ✅ Built, pixel-matched |
 | Treatment tab | ❌ Not built (tab label renders, no content; "Go to treatment plan" button is inert) |
 | Home Plan tab | ❌ Not built |
 | Evaluation tab | ❌ Not built |
@@ -120,7 +129,6 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 
 ## Pending Tasks
 
-- Build the landing/mic-entry screen (routes into `/assessment` on tap, per reference).
 - Build Treatment, Home Plan, and Evaluation tab content.
 - Wire the Assessment screen to real backend endpoints (findings, working diagnosis, insights, log-a-test submission) instead of hardcoded frontend data.
 - Swap the placeholder Tailwind palette (default shadcn neutral tokens) for the actual Lovable design tokens/hex values once provided.
@@ -155,3 +163,4 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
 - **2026-08-02** — Built the full Patient Intake / Assessment screen at `/assessment`: shared top nav, Assessment tab strip, collapsible Patient Summary card, and the PTee Assistant panel (confidence meter, Cancel/Working-diagnosis/Complete↔Completed states, diagnosis Agree/Update/Fully-change block, Reopen-diagnosis/Go-to-treatment-plan banner) with a findings list supporting per-row detail expansion, manual "Type finding instead" override, and deletion. Verified via headless-browser screenshot testing against both dev and production builds.
 - **2026-08-02** — Published the initial commit (`"PTee health Assessment"`) to `https://github.com/dubey-dot/pTee_Health.git`, re-authored as `dubey-dot <dubey@pteehealth.com>`, pushed directly to the URL without modifying git config or the existing (unreachable) `origin` remote.
 - **2026-08-02** — Added this document (`PROJECT_PROGRESS.md`) as the standing source of truth for project status, to be updated after every meaningful task going forward.
+- **2026-08-02** — Built the Home / hero landing screen at `/` (`hero-section.tsx`, `quick-actions-bar.tsx`), pixel-matched from Lovable reference screenshots: rotating headline word + achievement badge (mock data, 4s interval), circular mic button routing to `/assessment`, and a fixed bottom quick-actions pill. Re-pointed the shared `TopNav`'s "New Patients" link from `/assessment` to `/` so the mic screen is now the entry point into the New Patient flow. Verified via `npm run build` and headless-browser screenshots (desktop 1280px, mobile 390px, both rotation states).

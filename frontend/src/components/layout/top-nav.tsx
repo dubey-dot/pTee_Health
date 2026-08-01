@@ -1,7 +1,7 @@
 import { Bell, Search, Sparkles } from "lucide-react";
 
 const NAV_ITEMS = [
-  { label: "New Patients", href: "/assessment" },
+  { label: "New Patients", href: "/" },
   { label: "Existing Patients", href: "#" },
   { label: "Dashboard", href: "#" },
 ] as const;
