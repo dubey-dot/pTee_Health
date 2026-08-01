@@ -1,0 +1,150 @@
+"use client";
+
+import { useState } from "react";
+import {
+  ArrowRight,
+  Check,
+  CircleCheck,
+  Lightbulb,
+  Pencil,
+  RotateCcw,
+  Sparkles,
+  X,
+} from "lucide-react";
+
+import { FindingsList } from "@/components/assessment/findings-list";
+import { cn } from "@/lib/utils";
+
+type Status = "reviewing" | "completed";
+type DiagnosisAction = "agree" | "update" | "fully-change";
+
+const DIAGNOSIS_ACTIONS = [
+  { value: "agree", label: "Agree", icon: Check },
+  { value: "update", label: "Update", icon: Pencil },
+  { value: "fully-change", label: "Fully change", icon: RotateCcw },
+] as const;
+
+export interface PteeAssistantPanelProps {
+  confidence?: number;
+  diagnosis?: string;
+  initialStatus?: Status;
+}
+
+export function PteeAssistantPanel({
+  confidence = 64,
+  diagnosis = "Load-related right anterior knee pain",
+  initialStatus = "completed",
+}: PteeAssistantPanelProps) {
+  const [status, setStatus] = useState<Status>(initialStatus);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(true);
+  const [diagnosisAction, setDiagnosisAction] = useState<DiagnosisAction>("agree");
+
+  const confidenceLabel = confidence >= 60 ? "Good" : confidence >= 40 ? "Fair" : "Low";
+
+  return (
+    <div className="rounded-2xl border border-sky-100 bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+            <Sparkles className="h-4 w-4 text-sky-600" />
+            PTee Assistant
+          </span>
+          <span className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-slate-500">
+            CONFIDENCE
+            <span className="h-1 w-10 overflow-hidden rounded-full bg-slate-200">
+              <span
+                className="block h-full rounded-full bg-sky-600"
+                style={{ width: `${confidence}%` }}
+              />
+            </span>
+            <span className="font-normal text-slate-400">{confidence}%</span>
+            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+              {confidenceLabel}
+            </span>
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3.5 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+          >
+            <X className="h-3.5 w-3.5" />
+            Cancel
+          </button>
+          <button
+            type="button"
+            aria-pressed={diagnosisOpen}
+            onClick={() => setDiagnosisOpen((v) => !v)}
+            className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+          >
+            <Lightbulb className="h-3.5 w-3.5" />
+            Working diagnosis
+          </button>
+          {status === "reviewing" ? (
+            <button
+              type="button"
+              onClick={() => setStatus("completed")}
+              className="flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            >
+              <CircleCheck className="h-3.5 w-3.5" />
+              Complete
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-sm font-medium text-emerald-700">
+              <CircleCheck className="h-3.5 w-3.5" />
+              Completed
+            </span>
+          )}
+        </div>
+      </div>
+
+      {diagnosisOpen &&
+        (status === "reviewing" ? (
+          <div className="mt-4 border-b border-slate-100 pb-4">
+            <p className="text-sm font-medium text-sky-700">{diagnosis}</p>
+            <div className="mt-3 flex gap-2">
+              {DIAGNOSIS_ACTIONS.map((action) => (
+                <button
+                  key={action.value}
+                  type="button"
+                  onClick={() => setDiagnosisAction(action.value)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+                    diagnosisAction === action.value
+                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  <action.icon className="h-3.5 w-3.5" />
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setStatus("reviewing")}
+              className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reopen diagnosis
+            </button>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            >
+              Go to treatment plan
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+
+      <div className="mt-4">
+        <FindingsList />
+      </div>
+    </div>
+  );
+}
