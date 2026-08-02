@@ -1,0 +1,121 @@
+export interface PatientField {
+  label: string;
+  value: string;
+}
+
+export interface PatientSummary {
+  id: string;
+  name: string;
+  fields: PatientField[];
+  clinicalSummary: string;
+  doctorsNotesCount: number;
+}
+
+export type AssessmentStatus = "reviewing" | "completed";
+export type DiagnosisAction = "agree" | "update" | "fully-change";
+
+export interface Assessment {
+  id: string;
+  patientId: string;
+  status: AssessmentStatus;
+  diagnosis: string;
+  confidence: number;
+  diagnosisAction: DiagnosisAction | null;
+  version: number;
+}
+
+export interface FindingDetail {
+  question: string;
+  bullets: string[];
+}
+
+export interface Finding {
+  id: string;
+  assessmentId: string;
+  tag: string;
+  label: string;
+  selected: boolean;
+  detail: FindingDetail | null;
+}
+
+export type TestType = "joint" | "muscle" | "gait";
+
+export interface LoggedTest {
+  id: string;
+  assessmentId: string;
+  type: TestType;
+  name: string;
+  result: string;
+}
+
+export interface InsightTag {
+  label: string;
+  meta: string;
+}
+
+export interface Insights {
+  assessmentId: string;
+  summary: string;
+  tags: InsightTag[];
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/v1${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API ${init?.method ?? "GET"} ${path} failed: ${res.status} ${body}`);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  getPatient: (patientId: string) => request<PatientSummary>(`/patients/${patientId}`),
+
+  getAssessment: (assessmentId: string) => request<Assessment>(`/assessments/${assessmentId}`),
+
+  updateAssessmentStatus: (assessmentId: string, status: AssessmentStatus) =>
+    request<Assessment>(`/assessments/${assessmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  updateDiagnosis: (
+    assessmentId: string,
+    data: { action?: DiagnosisAction; diagnosis?: string }
+  ) =>
+    request<Assessment>(`/assessments/${assessmentId}/diagnosis`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  getFindings: (assessmentId: string) =>
+    request<Finding[]>(`/assessments/${assessmentId}/findings`),
+
+  updateFinding: (findingId: string, label: string) =>
+    request<Finding>(`/findings/${findingId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ label }),
+    }),
+
+  deleteFinding: (findingId: string) => request<void>(`/findings/${findingId}`, { method: "DELETE" }),
+
+  createTest: (assessmentId: string, data: { type: TestType; name: string; result: string }) =>
+    request<LoggedTest>(`/assessments/${assessmentId}/tests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getInsights: (assessmentId: string) => request<Insights>(`/assessments/${assessmentId}/insights`),
+};

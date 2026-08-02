@@ -13,8 +13,8 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 ## Architecture
 
 - **Frontend**: Next.js App Router. Server Components for static layout; Client Components (`"use client"`) for anything with interactive state (panels, toggles, forms). No global state manager — each interactive component owns its local `useState`.
-- **Backend**: FastAPI, mocked REST endpoints. Intended contract: the frontend consumes the backend "exactly as if it were production," so swapping mocked responses for real AI/RAG output later requires no frontend rewrite. **Not yet wired up** — see Backend APIs section.
-- **Data flow today**: The Assessment screen is entirely frontend-local. Mock finding/diagnosis/insight data is hardcoded as component defaults/props; nothing is fetched from the backend yet.
+- **Backend**: FastAPI, layered `api/v1` (routers) → `services` (business logic) → `schemas` (Pydantic contracts) → `services/store.py` (in-memory fixture "database," seeded with the same demo data that used to be hardcoded in the frontend). Contract: the frontend consumes the backend "exactly as if it were production," so swapping the fixture store for a real database and the fixture-backed `diagnosis_service`/`insight_service` for the future RAG pipeline requires no frontend rewrite — see `BACKEND_INTEGRATION_PLAN.md`.
+- **Data flow today**: The Assessment screen fetches its initial data (patient summary, assessment/diagnosis, findings, insights) server-side from FastAPI in an async Server Component, then hands off to TanStack Query on the client for interactivity — delete/relabel findings, diagnosis actions, status transitions, and "Log a test" are all real mutations against the backend's in-memory store (optimistic UI on delete/relabel, with rollback on error). No hardcoded finding/diagnosis/insight data remains in frontend components.
 - **Repo layout**: `frontend/` and `backend/` as sibling directories at repo root (see Folder Structure).
 
 ## Technology Stack
@@ -31,7 +31,11 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 **Backend**
 - FastAPI 0.116.1
 - Uvicorn 0.35.0 (`[standard]`)
+- pydantic-settings 2.7.1 (env-driven config)
 - Python 3.13, isolated via `backend/.venv`
+
+**Data fetching (frontend)**
+- @tanstack/react-query — client-side caching, mutations, optimistic updates against the FastAPI backend
 
 **Tooling**
 - ESLint 9 (flat config)
@@ -43,15 +47,17 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 ```
 PTeeHealth/
 ├── PROJECT_PROGRESS.md
+├── BACKEND_INTEGRATION_PLAN.md           # Phase 2-5 backend integration roadmap
 ├── README.md
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── page.tsx                  # Home / hero "tap to begin" landing screen
 │   │   │   ├── layout.tsx
+│   │   │   ├── providers.tsx             # TanStack Query client provider
 │   │   │   ├── globals.css               # Tailwind v4 tokens (default shadcn palette — not yet swapped for Lovable's real tokens)
 │   │   │   └── assessment/
-│   │   │       └── page.tsx              # Patient Intake / Assessment screen route
+│   │   │       └── page.tsx              # Patient Intake / Assessment screen route — async Server Component, fetches from FastAPI
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   └── top-nav.tsx
@@ -61,19 +67,48 @@ PTeeHealth/
 │   │   │   ├── assessment/
 │   │   │   │   ├── assessment-tabs.tsx
 │   │   │   │   ├── patient-summary-card.tsx
-│   │   │   │   ├── ptee-assistant-panel.tsx
+│   │   │   │   ├── ptee-assistant-panel.tsx   # useQuery/useMutation against /assessments/{id}
 │   │   │   │   ├── finding-row.tsx
-│   │   │   │   ├── findings-list.tsx
+│   │   │   │   ├── findings-list.tsx          # useQuery/useMutation against /assessments/{id}/findings
 │   │   │   │   ├── log-test-panel.tsx
-│   │   │   │   └── insights-panel.tsx
+│   │   │   │   └── insights-panel.tsx         # useQuery against /assessments/{id}/insights
 │   │   │   └── ui/                       # shadcn primitives (button, input)
-│   │   └── lib/utils.ts                  # cn() helper
+│   │   └── lib/
+│   │       ├── api.ts                    # typed fetch client for the FastAPI backend
+│   │       ├── constants.ts              # DEFAULT_PATIENT_ID / DEFAULT_ASSESSMENT_ID (stand-in until patient routing exists)
+│   │       └── utils.ts                  # cn() helper
 │   ├── components.json                   # shadcn config
+│   ├── .env.example                      # documents NEXT_PUBLIC_API_BASE_URL
 │   └── package.json
 └── backend/
     ├── app/
     │   ├── __init__.py
-    │   └── main.py                       # FastAPI app, CORS, /health
+    │   ├── main.py                       # FastAPI app factory, CORS, /health, mounts /api/v1
+    │   ├── core/
+    │   │   ├── config.py                 # pydantic-settings (ALLOWED_ORIGINS)
+    │   │   └── deps.py                   # get_current_user no-op stub (Phase 5 auth seam)
+    │   ├── api/v1/
+    │   │   ├── router.py                 # aggregates all /api/v1 routers
+    │   │   ├── patients.py
+    │   │   ├── assessments.py
+    │   │   ├── findings.py
+    │   │   ├── diagnosis.py
+    │   │   ├── tests.py                  # "log a test"
+    │   │   └── insights.py
+    │   ├── schemas/                      # Pydantic request/response models, camelCase over the wire
+    │   │   ├── base.py                   # CamelModel — shared alias-generator base
+    │   │   ├── patient.py
+    │   │   ├── assessment.py
+    │   │   ├── finding.py
+    │   │   ├── test.py
+    │   │   └── insight.py
+    │   └── services/                     # business logic + fixture store
+    │       ├── store.py                  # in-memory fixture "database," seeded with demo patient/assessment
+    │       ├── patients.py
+    │       ├── assessments.py
+    │       ├── findings.py
+    │       ├── tests.py
+    │       └── insights.py               # Phase 4 RAG seam
     ├── requirements.txt
     ├── .env.example                      # documents ALLOWED_ORIGINS
     └── .gitignore
@@ -109,15 +144,26 @@ PTeeHealth/
 
 ## Backend APIs Implemented
 
+All under `/api/v1`, fixture/in-memory-backed (no real database yet — see `BACKEND_INTEGRATION_PLAN.md` Phase 3). Seeded with one demo patient (`patient-1`, Ankita Sharma) and one demo assessment (`assessment-1`) matching the data that used to be hardcoded in the frontend.
+
 | Endpoint | Method | Status |
 |---|---|---|
 | `/health` | GET | Implemented — returns `{"status": "ok"}` |
+| `/api/v1/patients` | GET, POST | Implemented |
+| `/api/v1/patients/{patient_id}` | GET, PATCH | Implemented |
+| `/api/v1/patients/{patient_id}/assessments` | GET, POST | Implemented |
+| `/api/v1/assessments/{assessment_id}` | GET, PATCH | Implemented — status transitions (reviewing/completed) |
+| `/api/v1/assessments/{assessment_id}/findings` | GET, POST | Implemented |
+| `/api/v1/findings/{finding_id}` | PATCH, DELETE | Implemented — relabel, delete |
+| `/api/v1/assessments/{assessment_id}/diagnosis` | GET, PATCH | Implemented — agree/update/fully-change actions |
+| `/api/v1/assessments/{assessment_id}/tests` | GET, POST | Implemented — "Log a test" |
+| `/api/v1/assessments/{assessment_id}/insights` | GET | Implemented (fixture summary/tags; Phase 4 RAG seam) |
 
-No feature endpoints exist yet. Findings, diagnosis, insights, and "log a test" data are all hardcoded in frontend components — **not** served by the backend. This is the next major integration gap (see Pending Tasks).
+The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), voice endpoints, and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content).
 
 ## AI & RAG Integration Progress
 
-None. No AI/LLM calls, no RAG pipeline, no vector database, no embeddings anywhere in the codebase. All "AI-generated" content visible in the UI (working diagnosis text, confidence percentage, insight summaries) is static placeholder data used purely to match the reference design pixel-for-pixel — not produced by any model.
+None. No AI/LLM calls, no RAG pipeline, no vector database, no embeddings anywhere in the codebase. Working diagnosis text, confidence percentage, and insight summaries are now served by the backend (`diagnosis`/`insights` fields on the `Assessment` fixture record and `insight_service.get_insights`) rather than hardcoded in frontend components, but the values themselves are still static fixture data, not produced by any model. `app/services/insights.py` and the diagnosis fields on `app/services/assessments.py` are the seams `BACKEND_INTEGRATION_PLAN.md` Phase 4 swaps for real RAG-backed generation, without changing the API contract.
 
 ## Deployment Progress
 
@@ -129,12 +175,14 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 
 ## Pending Tasks
 
-- Build Treatment, Home Plan, and Evaluation tab content.
-- Wire the Assessment screen to real backend endpoints (findings, working diagnosis, insights, log-a-test submission) instead of hardcoded frontend data.
+- Build Treatment, Home Plan, and Evaluation tab content (frontend UI + backend routes, per `BACKEND_INTEGRATION_PLAN.md` Phase 3).
 - Swap the placeholder Tailwind palette (default shadcn neutral tokens) for the actual Lovable design tokens/hex values once provided.
-- Real voice capture for mic buttons (currently visual-only toggles).
-- Auth, database, and persistence layer (explicitly out of scope until a later phase per project scope).
+- Real voice capture for mic buttons (currently visual-only toggles); backend `/voice/*` endpoints (Phase 4).
+- Real database (Postgres via SQLAlchemy/Alembic) to replace the in-memory fixture store in `backend/app/services/store.py` (Phase 3) — current data does not survive a backend restart.
+- Real auth, multi-clinician / senior-review workflow (Phase 5) — `get_current_user` is currently a wired-in no-op.
+- RAG pipeline behind `diagnosis_service`/`insight_service` (Phase 4).
 - Deployment execution (Vercel + backend host) once there's a live integration worth deploying.
+- Patient selection / routing UI — the Assessment screen currently always points at the one seeded demo patient/assessment (`DEFAULT_PATIENT_ID`/`DEFAULT_ASSESSMENT_ID` in `frontend/src/lib/constants.ts`); becomes a route param once patient list/creation UI exists.
 
 ## Known Issues
 
@@ -164,3 +212,10 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
 - **2026-08-02** — Published the initial commit (`"PTee health Assessment"`) to `https://github.com/dubey-dot/pTee_Health.git`, re-authored as `dubey-dot <dubey@pteehealth.com>`, pushed directly to the URL without modifying git config or the existing (unreachable) `origin` remote.
 - **2026-08-02** — Added this document (`PROJECT_PROGRESS.md`) as the standing source of truth for project status, to be updated after every meaningful task going forward.
 - **2026-08-02** — Built the Home / hero landing screen at `/` (`hero-section.tsx`, `quick-actions-bar.tsx`), pixel-matched from Lovable reference screenshots: rotating headline word + achievement badge (mock data, 4s interval), circular mic button routing to `/assessment`, and a fixed bottom quick-actions pill. Re-pointed the shared `TopNav`'s "New Patients" link from `/assessment` to `/` so the mic screen is now the entry point into the New Patient flow. Verified via `npm run build` and headless-browser screenshots (desktop 1280px, mobile 390px, both rotation states).
+- **2026-08-02** — Authored `BACKEND_INTEGRATION_PLAN.md`: the Phase 2-5 roadmap for replacing hardcoded frontend data with a real FastAPI-backed integration — layered backend architecture (`api/v1`/`schemas`/`services`), REST endpoint design, TanStack Query-based frontend data flow, cache/persistence strategy, and the service-layer seams reserved for the future RAG pipeline and healthcare API integrations.
+- **2026-08-02** — Implemented Phase 2 (fixture-backed backend + Assessment screen wiring) end-to-end:
+  - Restructured `backend/app` from a single `main.py` into `core/` (settings, auth stub), `schemas/` (Pydantic models with a shared `CamelModel` base so JSON responses match the frontend's camelCase types), `services/` (business logic over an in-memory fixture store seeded with the existing demo patient/assessment/findings data), and `api/v1/` (routers for patients, assessments, findings, diagnosis, tests, insights).
+  - Added `pydantic-settings` for env-driven CORS config; `get_current_user` wired in as a no-op dependency across all `/api/v1` routes as the Phase 5 auth seam.
+  - Added TanStack Query (`@tanstack/react-query`) to the frontend, a typed `lib/api.ts` fetch client, and `lib/constants.ts` for the (temporary, pre-patient-routing) default patient/assessment IDs.
+  - Converted `assessment/page.tsx` to an async Server Component that fetches patient/assessment/findings/insights from FastAPI, passed down as React Query `initialData`. `PteeAssistantPanel`, `FindingsList`, and `InsightsPanel` now read live backend state and issue real mutations (delete/relabel findings with optimistic updates + rollback, diagnosis agree/update/fully-change, status reviewing↔completed, log-a-test submission) instead of owning hardcoded local state.
+  - Verified: `npm run lint` and `npm run build` clean; backend endpoints round-tripped via curl (including PATCH/DELETE/POST mutations and assessment version bumping); full browser verification via a headless-Chromium Playwright script confirmed the rendered page is pixel-identical to the pre-integration version, and that deleting a finding removes it and the removal survives a page reload (proving the mutation persists server-side, not just in local UI state) with zero console errors.

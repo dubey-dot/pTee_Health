@@ -1,47 +1,71 @@
 "use client";
 
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { useState } from "react";
 
-import { FindingRow, type Finding } from "@/components/assessment/finding-row";
+import { FindingRow } from "@/components/assessment/finding-row";
 import { InsightsPanel } from "@/components/assessment/insights-panel";
 import { LogTestPanel } from "@/components/assessment/log-test-panel";
+import { api, type Finding, type Insights, type TestType } from "@/lib/api";
 
-const INITIAL_FINDINGS: Finding[] = [
-  {
-    id: "pelvis-shift",
-    tag: "GAIT",
-    label: "Pelvis Shift Right/Left",
-    selected: true,
-    detail: {
-      question: "Is the pelvis shifted to one side over the feet?",
-      bullets: [
-        "Shift right / left",
-        "Weight distribution",
-        "Lateral trunk lean",
-        "Frontal-plane symmetry",
-      ],
-    },
-  },
-  { id: "pelvis-rotation", tag: "JOINT", label: "Pelvis Rotation Right/Left" },
-  { id: "ribcage-position", tag: "JOINT", label: "Ribcage Position" },
-  { id: "neck-position", tag: "JOINT", label: "Neck Position" },
-  { id: "spinal-position", tag: "JOINT", label: "Spinal Position" },
-];
+export interface FindingsListProps {
+  assessmentId: string;
+  initialFindings: Finding[];
+  initialInsights: Insights;
+}
 
-export function FindingsList() {
-  const [findings, setFindings] = useState<Finding[]>(INITIAL_FINDINGS);
+export function FindingsList({ assessmentId, initialFindings, initialInsights }: FindingsListProps) {
+  const queryClient = useQueryClient();
   const [showLogTest, setShowLogTest] = useState(false);
+  const findingsKey = ["findings", assessmentId];
 
-  const handleDelete = (id: string) => {
-    setFindings((prev) => prev.filter((f) => f.id !== id));
-  };
+  const { data: findings = [] } = useQuery({
+    queryKey: findingsKey,
+    queryFn: () => api.getFindings(assessmentId),
+    initialData: initialFindings,
+  });
 
-  const handleRelabel = (id: string, newLabel: string) => {
-    setFindings((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, label: newLabel } : f))
-    );
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteFinding(id),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: findingsKey });
+      const previous = queryClient.getQueryData<Finding[]>(findingsKey);
+      queryClient.setQueryData<Finding[]>(findingsKey, (prev) =>
+        (prev ?? []).filter((f) => f.id !== id)
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(findingsKey, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: findingsKey }),
+  });
+
+  const relabelMutation = useMutation({
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.updateFinding(id, label),
+    onMutate: async ({ id, label }) => {
+      await queryClient.cancelQueries({ queryKey: findingsKey });
+      const previous = queryClient.getQueryData<Finding[]>(findingsKey);
+      queryClient.setQueryData<Finding[]>(findingsKey, (prev) =>
+        (prev ?? []).map((f) => (f.id === id ? { ...f, label } : f))
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(findingsKey, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: findingsKey }),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: (test: { type: TestType; name: string; result: string }) =>
+      api.createTest(assessmentId, test),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["insights", assessmentId] });
+      setShowLogTest(false);
+    },
+  });
 
   return (
     <div className="space-y-2">
@@ -49,13 +73,16 @@ export function FindingsList() {
         <FindingRow
           key={finding.id}
           finding={finding}
-          onDelete={handleDelete}
-          onRelabel={handleRelabel}
+          onDelete={(id) => deleteMutation.mutate(id)}
+          onRelabel={(id, label) => relabelMutation.mutate({ id, label })}
         />
       ))}
 
       {showLogTest ? (
-        <LogTestPanel onClose={() => setShowLogTest(false)} onSave={() => setShowLogTest(false)} />
+        <LogTestPanel
+          onClose={() => setShowLogTest(false)}
+          onSave={(test) => testMutation.mutate(test)}
+        />
       ) : (
         <button
           type="button"
@@ -67,7 +94,7 @@ export function FindingsList() {
         </button>
       )}
 
-      <InsightsPanel />
+      <InsightsPanel assessmentId={assessmentId} initialInsights={initialInsights} />
     </div>
   );
 }

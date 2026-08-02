@@ -1,20 +1,28 @@
-import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="PTee Health API")
-
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from app.api.v1.router import router as api_v1_router
+from app.core.config import get_settings
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(title="PTee Health API")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins_list,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(api_v1_router, prefix="/api/v1")
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    return app
+
+
+app = create_app()

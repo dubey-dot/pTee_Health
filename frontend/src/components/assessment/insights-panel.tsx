@@ -1,34 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Sparkles } from "lucide-react";
+import { useState } from "react";
 
+import { api, type Insights } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export interface InsightTag {
-  label: string;
-  meta: string;
-}
-
 export interface InsightsPanelProps {
-  summary?: string;
-  tags?: InsightTag[];
+  assessmentId: string;
+  initialInsights: Insights;
   defaultOpen?: boolean;
 }
 
-const DEFAULT_SUMMARY =
-  "Biceps Femoris: Quad — weak. Next, Pelvis Shift Right/Left. A lateral pelvic shift changes hip loading and frontal-plane control.";
-
-const DEFAULT_TAGS: InsightTag[] = [
-  { label: "Biceps Femoris — Quad — weak", meta: "8 recorded" },
-];
-
 export function InsightsPanel({
-  summary = DEFAULT_SUMMARY,
-  tags = DEFAULT_TAGS,
+  assessmentId,
+  initialInsights,
   defaultOpen = true,
 }: InsightsPanelProps) {
   const [open, setOpen] = useState(defaultOpen);
+
+  const { data: insights } = useQuery({
+    queryKey: ["insights", assessmentId],
+    queryFn: () => api.getInsights(assessmentId),
+    initialData: initialInsights,
+  });
 
   return (
     <div className="rounded-2xl border border-sky-100 bg-sky-50/60">
@@ -52,9 +48,9 @@ export function InsightsPanel({
 
       {open && (
         <div className="space-y-3 px-5 pb-5">
-          <p className="text-sm leading-6 text-slate-700">{summary}</p>
+          <p className="text-sm leading-6 text-slate-700">{insights.summary}</p>
 
-          {tags.map((tag) => (
+          {insights.tags.map((tag) => (
             <div
               key={tag.label}
               className="flex items-center justify-between rounded-full bg-white px-4 py-2"

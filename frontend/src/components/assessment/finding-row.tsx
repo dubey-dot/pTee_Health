@@ -3,20 +3,8 @@
 import { useState } from "react";
 import { Info, Mic, PlayCircle, Trash2 } from "lucide-react";
 
+import type { Finding } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-export interface FindingDetail {
-  question: string;
-  bullets: string[];
-}
-
-export interface Finding {
-  id: string;
-  tag: string;
-  label: string;
-  selected?: boolean;
-  detail?: FindingDetail;
-}
 
 export interface FindingRowProps {
   finding: Finding;

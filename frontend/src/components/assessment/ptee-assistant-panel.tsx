@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
@@ -11,12 +11,18 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useState } from "react";
 
 import { FindingsList } from "@/components/assessment/findings-list";
+import {
+  api,
+  type Assessment,
+  type AssessmentStatus,
+  type DiagnosisAction,
+  type Finding,
+  type Insights,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-type Status = "reviewing" | "completed";
-type DiagnosisAction = "agree" | "update" | "fully-change";
 
 const DIAGNOSIS_ACTIONS = [
   { value: "agree", label: "Agree", icon: Check },
@@ -25,20 +31,39 @@ const DIAGNOSIS_ACTIONS = [
 ] as const;
 
 export interface PteeAssistantPanelProps {
-  confidence?: number;
-  diagnosis?: string;
-  initialStatus?: Status;
+  assessmentId: string;
+  initialAssessment: Assessment;
+  initialFindings: Finding[];
+  initialInsights: Insights;
 }
 
 export function PteeAssistantPanel({
-  confidence = 64,
-  diagnosis = "Load-related right anterior knee pain",
-  initialStatus = "completed",
+  assessmentId,
+  initialAssessment,
+  initialFindings,
+  initialInsights,
 }: PteeAssistantPanelProps) {
-  const [status, setStatus] = useState<Status>(initialStatus);
+  const queryClient = useQueryClient();
   const [diagnosisOpen, setDiagnosisOpen] = useState(true);
-  const [diagnosisAction, setDiagnosisAction] = useState<DiagnosisAction>("agree");
+  const assessmentKey = ["assessment", assessmentId];
 
+  const { data: assessment } = useQuery({
+    queryKey: assessmentKey,
+    queryFn: () => api.getAssessment(assessmentId),
+    initialData: initialAssessment,
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: (status: AssessmentStatus) => api.updateAssessmentStatus(assessmentId, status),
+    onSuccess: (updated) => queryClient.setQueryData(assessmentKey, updated),
+  });
+
+  const diagnosisActionMutation = useMutation({
+    mutationFn: (action: DiagnosisAction) => api.updateDiagnosis(assessmentId, { action }),
+    onSuccess: (updated) => queryClient.setQueryData(assessmentKey, updated),
+  });
+
+  const { status, diagnosis, confidence, diagnosisAction } = assessment;
   const confidenceLabel = confidence >= 60 ? "Good" : confidence >= 40 ? "Fair" : "Low";
 
   return (
@@ -84,7 +109,7 @@ export function PteeAssistantPanel({
           {status === "reviewing" ? (
             <button
               type="button"
-              onClick={() => setStatus("completed")}
+              onClick={() => statusMutation.mutate("completed")}
               className="flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
             >
               <CircleCheck className="h-3.5 w-3.5" />
@@ -108,7 +133,7 @@ export function PteeAssistantPanel({
                 <button
                   key={action.value}
                   type="button"
-                  onClick={() => setDiagnosisAction(action.value)}
+                  onClick={() => diagnosisActionMutation.mutate(action.value)}
                   className={cn(
                     "flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
                     diagnosisAction === action.value
@@ -126,7 +151,7 @@ export function PteeAssistantPanel({
           <div className="mt-4 flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3">
             <button
               type="button"
-              onClick={() => setStatus("reviewing")}
+              onClick={() => statusMutation.mutate("reviewing")}
               className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -143,7 +168,11 @@ export function PteeAssistantPanel({
         ))}
 
       <div className="mt-4">
-        <FindingsList />
+        <FindingsList
+          assessmentId={assessmentId}
+          initialFindings={initialFindings}
+          initialInsights={initialInsights}
+        />
       </div>
     </div>
   );
