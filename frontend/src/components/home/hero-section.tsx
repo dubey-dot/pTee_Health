@@ -65,7 +65,7 @@ export function HeroSection() {
       </div>
 
       <Link
-        href="/assessment"
+        href="/patients/new"
         aria-label="Start new assessment"
         className="group relative mt-10 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-sky-700 shadow-lg shadow-sky-300/50 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300 sm:h-24 sm:w-24"
       >

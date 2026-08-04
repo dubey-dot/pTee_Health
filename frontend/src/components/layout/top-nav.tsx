@@ -1,8 +1,9 @@
 import { Bell, Search, Sparkles } from "lucide-react";
+import Link from "next/link";
 
 const NAV_ITEMS = [
-  { label: "New Patients", href: "/" },
-  { label: "Existing Patients", href: "#" },
+  { label: "New Patients", href: "/patients/new" },
+  { label: "Existing Patients", href: "/patients" },
   { label: "Dashboard", href: "#" },
 ] as const;
 
@@ -34,13 +35,13 @@ export function TopNav({ active = "New Patients" }: TopNavProps) {
                   {item.label}
                 </span>
               ) : (
-                <a
+                <Link
                   key={item.label}
                   href={item.href}
                   className="rounded-full px-4 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
                 >
                   {item.label}
-                </a>
+                </Link>
               )
             )}
           </nav>

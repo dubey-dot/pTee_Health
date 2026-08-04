@@ -60,15 +60,21 @@ PTeeHealth/
 │   │   │   ├── layout.tsx
 │   │   │   ├── providers.tsx             # TanStack Query client provider
 │   │   │   ├── globals.css               # Tailwind v4 tokens (default shadcn palette — not yet swapped for Lovable's real tokens)
-│   │   │   └── assessment/
-│   │   │       └── page.tsx              # Patient Intake / Assessment screen route — async Server Component, fetches from FastAPI
+│   │   │   ├── assessment/
+│   │   │   │   ├── page.tsx              # Seeded demo patient/assessment (fixed ids) — kept for backward compat
+│   │   │   │   └── [assessmentId]/page.tsx  # Any assessment by id — what patient creation/selection routes into
+│   │   │   └── patients/
+│   │   │       ├── new/page.tsx          # New patient intake form
+│   │   │       ├── page.tsx              # All patients list
+│   │   │       └── [patientId]/page.tsx  # One patient's assessment history
 │   │   ├── components/
 │   │   │   ├── layout/
-│   │   │   │   └── top-nav.tsx
+│   │   │   │   └── top-nav.tsx           # nav links wired to /patients/new, /patients
 │   │   │   ├── home/
-│   │   │   │   ├── hero-section.tsx       # rotating headline/badge + mic entry point (routes to /assessment)
+│   │   │   │   ├── hero-section.tsx       # rotating headline/badge + mic entry point (routes to /patients/new)
 │   │   │   │   └── quick-actions-bar.tsx  # fixed bottom pill (crop/type/draw/chat icons, visual-only)
 │   │   │   ├── assessment/
+│   │   │   │   ├── assessment-screen.tsx      # shared render, used by both /assessment routes
 │   │   │   │   ├── assessment-tabs.tsx
 │   │   │   │   ├── patient-summary-card.tsx
 │   │   │   │   ├── ptee-assistant-panel.tsx   # useQuery/useMutation against /assessments/{id}
@@ -76,10 +82,13 @@ PTeeHealth/
 │   │   │   │   ├── findings-list.tsx          # useQuery/useMutation against /assessments/{id}/findings
 │   │   │   │   ├── log-test-panel.tsx
 │   │   │   │   └── insights-panel.tsx         # useQuery against /assessments/{id}/insights
+│   │   │   ├── patients/
+│   │   │   │   ├── new-patient-form.tsx       # full intake form, creates patient + first assessment
+│   │   │   │   └── new-assessment-button.tsx  # starts another assessment for an existing patient
 │   │   │   └── ui/                       # shadcn primitives (button, input)
 │   │   └── lib/
 │   │       ├── api.ts                    # typed fetch client for the FastAPI backend
-│   │       ├── constants.ts              # DEFAULT_PATIENT_ID / DEFAULT_ASSESSMENT_ID (stand-in until patient routing exists)
+│   │       ├── constants.ts              # DEFAULT_PATIENT_ID / DEFAULT_ASSESSMENT_ID — only used by the fixed /assessment demo route now
 │   │       └── utils.ts                  # cn() helper
 │   ├── components.json                   # shadcn config
 │   ├── .env.example                      # documents NEXT_PUBLIC_API_BASE_URL
@@ -154,8 +163,12 @@ PTeeHealth/
 
 | Screen | Status |
 |---|---|
-| Patient Intake / Assessment tab (`/assessment`) | ✅ Built, pixel-matched |
-| Landing / "tap to begin assessment" mic screen (`/`) | ✅ Built, pixel-matched |
+| Patient Intake / Assessment tab (`/assessment`, seeded demo patient) | ✅ Built, pixel-matched |
+| Any assessment by id (`/assessment/[assessmentId]`) | ✅ Built — shares rendering with `/assessment` via `components/assessment/assessment-screen.tsx` |
+| Landing / "tap to begin assessment" mic screen (`/`) | ✅ Built, pixel-matched. Mic button now routes to `/patients/new`, not directly to `/assessment` |
+| New patient intake form (`/patients/new`) | ✅ Built — full form (name, age, gender, occupation/sport, chief complaint, duration, pain score, aggravating/relieving factors, previous injuries); only name required. Creates the patient + their first assessment, routes to `/assessment/{id}` |
+| Patients list (`/patients`) | ✅ Built — lists all patients with chief complaint, links to `/patients/{id}` |
+| Patient detail / assessment history (`/patients/[patientId]`) | ✅ Built — lists that patient's assessments, "+ New assessment" starts another one |
 | Treatment tab | ❌ Not built (tab label renders, no content; "Go to treatment plan" button is inert) |
 | Home Plan tab | ❌ Not built |
 | Evaluation tab | ❌ Not built |
@@ -177,7 +190,7 @@ All under `/api/v1`, Postgres-backed via SQLAlchemy + Alembic (data now survives
 | `/api/v1/assessments/{assessment_id}/tests` | GET, POST | Implemented — "Log a test" |
 | `/api/v1/assessments/{assessment_id}/insights` | GET | Implemented (fixture summary/tags; Phase 4 RAG seam) |
 
-The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), voice endpoints, and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content).
+The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. The `POST /patients`, `GET /patients`, `POST /patients/{id}/assessments`, and `GET /patients/{id}/assessments` endpoints were already implemented but unused by the frontend until now — `lib/api.ts` gained `createPatient`/`listPatients`/`createAssessment`/`listAssessmentsForPatient` wrappers to actually call them (see New patient intake / Patients list / Patient detail screens above). Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), voice endpoints, and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content).
 
 ## AI & RAG Integration Progress
 
@@ -200,8 +213,9 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 - RAG pipeline behind `diagnosis_service`/`insight_service`.
 - Deployment execution (Vercel + backend host) once there's a live integration worth deploying — the local Postgres setup (`docker-compose.yml`) is dev-only; production DB hosting is unaddressed.
 - Frontend automated test suite (still none — Jest/Vitest not evaluated yet); backend now has one (`backend/tests/`, pytest).
-- Richer data model per the PDF-derived backend Plan of Action (structured demographics, per-visit Intake Form, joint/muscle findings, Recommendation/Working-Diagnosis/Confidence engines, session lifecycle, treatment handoff, email/WhatsApp logging) — persistence migration (this entry's Change Log item) is the first phase of that plan; remaining phases not yet started.
-- Patient selection / routing UI — the Assessment screen currently always points at the one seeded demo patient/assessment (`DEFAULT_PATIENT_ID`/`DEFAULT_ASSESSMENT_ID` in `frontend/src/lib/constants.ts`); becomes a route param once patient list/creation UI exists.
+- Richer data model per the PDF-derived backend Plan of Action (structured demographics, per-visit Intake Form, joint/muscle findings, Recommendation/Working-Diagnosis/Confidence engines, session lifecycle, treatment handoff, email/WhatsApp logging) — persistence migration (Phase 1) is the only phase done; remaining phases not yet started.
+- No "delete patient" / edit-patient-details UI yet — patients created via `/patients/new` can't currently be renamed or removed from the app itself (only via direct API calls).
+- `/patients` has no search/filter/pagination — fine at current (near-zero) patient counts, will need it once real usage starts.
 
 ## Known Issues
 
@@ -245,3 +259,9 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
   - Rewrote all four services (`patients`, `assessments`, `findings`, `tests`) plus `insights` to be DB-backed via SQLAlchemy `Session`, injected into every route via a new `get_db()` FastAPI dependency; `core/config.py` gained `database_url` and now actually loads `backend/.env` (previously `Settings` had no `env_file` configured despite `.env.example` implying it did — fixed as part of this work).
   - Added the repo's first-ever automated test suite: `backend/tests/` (pytest + `httpx.TestClient`, 30 tests covering all 17 `/api/v1` routes' happy paths and 404 cases), running against a real dedicated `ptee_health_test` Postgres database (not mocks, not SQLite) with per-test transaction rollback for isolation.
   - Verified: all 30 pytest tests pass; `alembic upgrade head` on a fresh DB reproduces the old fixture's exact JSON responses byte-for-byte (confirmed via curl diff against the pre-migration output); `npm run build` clean; a production frontend build/start pointed at the new Postgres-backed backend confirmed server-side rendering still pulls live data correctly (patient name, findings, insights all present in the SSR HTML).
+- **2026-08-04** — Added multi-patient support to the frontend (backend needed no changes — `POST /patients`, `GET /patients`, `POST /patients/{id}/assessments`, and `GET /patients/{id}/assessments` already existed from Phase 2 but the frontend never called them):
+  - `lib/api.ts` gained `createPatient`, `listPatients`, `createAssessment`, `listAssessmentsForPatient` wrappers and a `PatientCreateInput` type.
+  - New screens: `/patients/new` (full intake form — name required, age/gender/occupation-sport/chief complaint/duration/pain score/aggravating/relieving/previous injuries all optional — creates the patient then their first assessment, routes to the new assessment), `/patients` (list all patients, links to each), `/patients/[patientId]` (that patient's assessment history + a "+ New assessment" button for follow-ups).
+  - New dynamic route `/assessment/[assessmentId]` renders any assessment by id; extracted the shared rendering into `components/assessment/assessment-screen.tsx` so the original fixed `/assessment` route (still shows the seeded Ankita Sharma demo, kept for backward compatibility) and the new dynamic route don't duplicate markup.
+  - Re-pointed the Home screen's mic button and `TopNav`'s "New Patients"/"Existing Patients" links (previously inert/pointed at `/`) to the new intake form and patient list respectively.
+  - Verified: `npm run lint` and `npm run build` clean (7 routes registered correctly); full headless-browser Playwright run driving the real flow end-to-end — Home → mic → intake form → filled all 10 fields → submit → routed to a brand-new `/assessment/{id}` showing the just-entered patient data with a genuinely empty assessment (0 findings, `status: "reviewing"`, 0% confidence) → confirmed both the new patient and the original demo patient appear on `/patients` → confirmed the original `/assessment` demo route still renders unchanged. Zero console errors, zero failed network requests throughout.

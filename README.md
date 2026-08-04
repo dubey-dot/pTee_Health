@@ -14,14 +14,21 @@ AI-powered Clinical Decision Support Platform for physiotherapists.
 
 ## Project Overview
 
-**Phase 1** (UI) and **Phase 2** (backend integration) are complete for the
-**Patient Intake / Assessment screen** — the only fully built screen so far.
-Treatment, Home Plan, and Evaluation tabs render labels only, no content yet.
+**Phase 1** (UI), **Phase 2** (backend integration), and a persistence
+migration (Postgres) are complete for the **Patient Intake / Assessment
+screen**. Multi-patient support now exists too — patients aren't hardcoded
+to a single demo record anymore. Treatment, Home Plan, and Evaluation tabs
+still render labels only, no content yet.
 
 Current implementation:
 
 - **Frontend**: Next.js 16 (App Router, Turbopack), React 19, TypeScript,
-  Tailwind v4, shadcn/ui. Two routes: `/` (hero/mic entry) and `/assessment`.
+  Tailwind v4, shadcn/ui. Routes: `/` (hero/mic entry), `/patients/new`
+  (intake form — creates a patient + their first assessment), `/patients`
+  (list of all patients), `/patients/[patientId]` (that patient's
+  assessments), `/assessment` (the original seeded demo patient, kept for
+  backward compatibility), and `/assessment/[assessmentId]` (any assessment
+  by id — what the intake flow and patient list route into).
   `/assessment` is an async Server Component that fetches its initial data
   (patient, assessment, findings, insights) from the backend, then hands off
   to TanStack Query on the client for interactive mutations (delete/relabel
@@ -246,9 +253,16 @@ data, since it's Postgres-backed now.
 
 **Frontend routing**
 - [ ] `/` loads, hero headline rotates between two variants every ~4s
-- [ ] Mic button on `/` navigates to `/assessment`
-- [ ] `/assessment` loads directly (not just via navigation from `/`) without a 500
+- [ ] Mic button on `/` navigates to `/patients/new` (the intake form — not `/assessment` directly anymore)
+- [ ] `/assessment` (the original seeded demo, no id) still loads directly without a 500 — kept for backward compatibility
 - [ ] Browser devtools Network tab shows requests to `localhost:8000/api/v1/...`, not hardcoded/mocked data
+
+**Multi-patient flow**
+- [ ] `/patients/new`: filling in just a name and submitting creates a patient and routes to `/assessment/{new-id}` — every other field is optional
+- [ ] The new assessment screen shows the just-entered patient fields, 0 findings, `status: "reviewing"`, 0% confidence ("Low") — a genuinely fresh assessment, not the demo data
+- [ ] `/patients` lists both the new patient and the original seeded "Ankita Sharma" — creating a patient never affects the demo one
+- [ ] Clicking a patient on `/patients` goes to `/patients/{id}`, listing their assessment(s); "+ New assessment" there creates another assessment for the *same* patient and routes to it
+- [ ] TopNav's "New Patients" / "Existing Patients" links go to `/patients/new` / `/patients` respectively (previously inert/wrong)
 
 **UI functionality — Assessment screen**
 - [ ] Patient Summary card shows "Ankita Sharma" and all fields; collapse/expand toggle works

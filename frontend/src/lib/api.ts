@@ -11,6 +11,19 @@ export interface PatientSummary {
   doctorsNotesCount: number;
 }
 
+export interface PatientCreateInput {
+  name: string;
+  age?: number;
+  gender?: string;
+  occupationSport?: string;
+  chiefComplaint?: string;
+  duration?: string;
+  painScore?: string;
+  aggravating?: string;
+  relieving?: string;
+  previousInjuries?: string;
+}
+
 export type AssessmentStatus = "reviewing" | "completed";
 export type DiagnosisAction = "agree" | "update" | "fully-change";
 
@@ -81,7 +94,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listPatients: () => request<PatientSummary[]>(`/patients`),
+
   getPatient: (patientId: string) => request<PatientSummary>(`/patients/${patientId}`),
+
+  createPatient: (data: PatientCreateInput) =>
+    request<PatientSummary>(`/patients`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listAssessmentsForPatient: (patientId: string) =>
+    request<Assessment[]>(`/patients/${patientId}/assessments`),
+
+  createAssessment: (patientId: string) =>
+    request<Assessment>(`/patients/${patientId}/assessments`, { method: "POST" }),
 
   getAssessment: (assessmentId: string) => request<Assessment>(`/assessments/${assessmentId}`),
 
