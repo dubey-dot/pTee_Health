@@ -231,8 +231,77 @@ curl.exe http://localhost:8000/api/v1/assessments/assessment-1/findings
 curl.exe http://localhost:8000/api/v1/assessments/assessment-1/insights
 ```
 
-Or use the interactive Swagger UI at **http://localhost:8000/docs** to try
-every endpoint (including PATCH/POST/DELETE mutations) by hand.
+Or use the interactive Swagger UI at **http://localhost:8000/docs** — click
+"Try it out" on any route and it builds a valid request body for you. This
+is the easiest way to test POST/PATCH/DELETE endpoints, since (see below)
+sending a JSON body via `curl.exe` from PowerShell has a real gotcha.
+
+### Testing POST endpoints (curl)
+
+> **PowerShell + `curl.exe` + JSON body gotcha:** PowerShell 5.1 mangles
+> embedded double quotes when it forwards a string argument to a *native*
+> executable like `curl.exe` — a plain `-d '{"name":"x"}'` will reach the
+> server as corrupted JSON (`Expecting property name enclosed in double
+> quotes`), even though the same string looks fine when you print it.
+> Prefix the command with the `--%` **stop-parsing token** so PowerShell
+> passes everything after it through completely literally, and
+> double-escape the inner quotes (`\"`) the way you would in cmd.exe:
+> ```powershell
+> curl.exe --% -X POST <url> -H "Content-Type: application/json" -d "{\"key\":\"value\"}"
+> ```
+> (This isn't a project bug — it's how PowerShell 5.1 talks to any native
+> `.exe`. `Invoke-RestMethod`/`Invoke-WebRequest` don't have this problem,
+> but they're not `curl.exe`, which is what these examples standardize on.)
+
+**Create a patient** — only `name` is required, every other field is optional
+(matches the intake form on `/patients/new`):
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/patients -H "Content-Type: application/json" -d "{\"name\":\"Test Patient\",\"age\":30,\"gender\":\"Female\",\"chiefComplaint\":\"Lower back pain\"}"
+```
+
+Copy the `"id"` from the response (e.g. `patient-6ee61b2a`) for the next step.
+
+**Create an assessment for that patient** — no request body:
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/patients/patient-6ee61b2a/assessments
+```
+
+Copy the `"id"` from *this* response (e.g. `assessment-837ac696`) for the
+next two steps.
+
+**Log a finding against that assessment:**
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/findings -H "Content-Type: application/json" -d "{\"tag\":\"JOINT\",\"label\":\"Hip Flexion Test\"}"
+```
+
+**Log a test against that assessment** — `type` must be `joint`, `muscle`, or `gait`:
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/tests -H "Content-Type: application/json" -d "{\"type\":\"joint\",\"name\":\"Single leg bridge\",\"result\":\"Weak on right\"}"
+```
+
+**What to check on each response:**
+- Status `201`, and the JSON body echoes back what you sent plus a
+  generated `id` and any FK field (`patientId`/`assessmentId`) filled in.
+- Missing a required field → `422` with a body like
+  `{"detail":[{"type":"missing","loc":["body","name"],...}]}` — this is
+  correct behavior, not a bug.
+- POSTing to a nonexistent parent (e.g. a patient id that doesn't exist) →
+  `404 {"detail":"Patient not found"}`, not a `500`.
+
+**Automated coverage:** every one of these POST endpoints already has
+passing tests in `backend/tests/` — see `test_patients.py::test_create_patient`,
+`test_assessments.py::test_create_assessment`, `test_findings.py::test_create_finding`,
+and `test_tests.py::test_create_test`. Running `pytest` (see Testing above)
+re-verifies all of this automatically without leaving data behind (each
+test rolls back). The curl walkthrough above is for manual/exploratory
+testing and *does* leave real rows in your dev database — there's no
+`DELETE /patients` endpoint yet to clean them up (see Known Issues in
+`Progress.md`), so expect test patients created this way to stick around
+until you reset via `docker compose down -v` (see Stopping above).
 
 ## Manual Verification Checklist
 
@@ -285,6 +354,12 @@ data, since it's Postgres-backed now.
 - [ ] Browser devtools console has **zero** uncaught errors during normal use of the checklist above
 
 ## Troubleshooting
+
+**`curl.exe -d '{"key":"value"}'` from PowerShell returns `Expecting property name enclosed in double quotes`**
+PowerShell 5.1 mangles embedded double quotes when forwarding an argument to
+a native `.exe`. See "Testing POST endpoints (curl)" above for the `--%`
+stop-parsing-token workaround — or just use the Swagger UI at `/docs`
+instead, which sidesteps this entirely.
 
 **Backend fails to start / every route 500s with a connection error**
 Postgres isn't running. `docker compose up -d` from `backend/` (Docker
