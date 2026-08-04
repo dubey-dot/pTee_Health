@@ -1,10 +1,14 @@
 import uuid
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.assessment_session import AssessmentSession
+from app.models.legacy_test import LoggedTest as LoggedTestModel
 from app.schemas.test import LoggedTest, LoggedTestCreate
-from app.services.store import ASSESSMENTS, TESTS, TestRecord, bump_assessment_version
 
 
-def _to_schema(record: TestRecord) -> LoggedTest:
+def _to_schema(record: LoggedTestModel) -> LoggedTest:
     return LoggedTest(
         id=record.id,
         assessment_id=record.assessment_id,
@@ -14,21 +18,27 @@ def _to_schema(record: TestRecord) -> LoggedTest:
     )
 
 
-def list_tests(assessment_id: str) -> list[LoggedTest]:
-    return [_to_schema(t) for t in TESTS.values() if t.assessment_id == assessment_id]
+def list_tests(db: Session, assessment_id: str) -> list[LoggedTest]:
+    records = db.scalars(
+        select(LoggedTestModel).where(LoggedTestModel.assessment_id == assessment_id)
+    ).all()
+    return [_to_schema(t) for t in records]
 
 
-def create_test(assessment_id: str, data: LoggedTestCreate) -> LoggedTest | None:
-    if assessment_id not in ASSESSMENTS:
+def create_test(db: Session, assessment_id: str, data: LoggedTestCreate) -> LoggedTest | None:
+    assessment = db.get(AssessmentSession, assessment_id)
+    if assessment is None:
         return None
     test_id = f"test-{uuid.uuid4().hex[:8]}"
-    record = TestRecord(
+    record = LoggedTestModel(
         id=test_id,
         assessment_id=assessment_id,
         type=data.type,
         name=data.name,
         result=data.result,
     )
-    TESTS[test_id] = record
-    bump_assessment_version(assessment_id)
+    db.add(record)
+    assessment.version += 1
+    db.commit()
+    db.refresh(record)
     return _to_schema(record)

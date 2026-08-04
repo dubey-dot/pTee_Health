@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ptee_health_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ptee
+      POSTGRES_PASSWORD: ptee
+      POSTGRES_DB: ptee_health
+    ports:
+      # Host port 5433 (not 5432) — avoids clashing with any Postgres already
+      # running natively on the host.
+      - "5433:5432"
+    volumes:
+      - ptee_health_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ptee -d ptee_health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ptee_health_postgres_data:

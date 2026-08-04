@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     allowed_origins: str = "http://localhost:3000"
+    database_url: str = "postgresql+psycopg://ptee:ptee@localhost:5433/ptee_health"
 
     @property
     def allowed_origins_list(self) -> list[str]:

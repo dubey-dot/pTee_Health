@@ -1,17 +1,20 @@
 import uuid
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.patient import Patient
 from app.schemas.patient import PatientCreate, PatientField, PatientSummary, PatientUpdate
-from app.services.store import PATIENTS, PatientRecord
 
 
-def _age_gender(record: PatientRecord) -> str:
+def _age_gender(record: Patient) -> str:
     parts = [str(record.age)] if record.age is not None else []
     if record.gender:
         parts.append(record.gender)
     return " · ".join(parts)
 
 
-def _to_summary(record: PatientRecord) -> PatientSummary:
+def _to_summary(record: Patient) -> PatientSummary:
     fields = [
         PatientField(label="Name", value=record.name),
         PatientField(label="Age / Gender", value=_age_gender(record)),
@@ -32,18 +35,19 @@ def _to_summary(record: PatientRecord) -> PatientSummary:
     )
 
 
-def list_patients() -> list[PatientSummary]:
-    return [_to_summary(record) for record in PATIENTS.values()]
+def list_patients(db: Session) -> list[PatientSummary]:
+    records = db.scalars(select(Patient)).all()
+    return [_to_summary(record) for record in records]
 
 
-def get_patient(patient_id: str) -> PatientSummary | None:
-    record = PATIENTS.get(patient_id)
+def get_patient(db: Session, patient_id: str) -> PatientSummary | None:
+    record = db.get(Patient, patient_id)
     return _to_summary(record) if record else None
 
 
-def create_patient(data: PatientCreate) -> PatientSummary:
+def create_patient(db: Session, data: PatientCreate) -> PatientSummary:
     patient_id = f"patient-{uuid.uuid4().hex[:8]}"
-    record = PatientRecord(
+    record = Patient(
         id=patient_id,
         name=data.name,
         age=data.age,
@@ -57,14 +61,18 @@ def create_patient(data: PatientCreate) -> PatientSummary:
         previous_injuries=data.previous_injuries,
         clinical_summary=data.clinical_summary,
     )
-    PATIENTS[patient_id] = record
+    db.add(record)
+    db.commit()
+    db.refresh(record)
     return _to_summary(record)
 
 
-def update_patient(patient_id: str, data: PatientUpdate) -> PatientSummary | None:
-    record = PATIENTS.get(patient_id)
+def update_patient(db: Session, patient_id: str, data: PatientUpdate) -> PatientSummary | None:
+    record = db.get(Patient, patient_id)
     if not record:
         return None
     for field_name, value in data.model_dump(exclude_unset=True).items():
         setattr(record, field_name, value)
+    db.commit()
+    db.refresh(record)
     return _to_summary(record)

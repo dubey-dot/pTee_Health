@@ -13,7 +13,7 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 ## Architecture
 
 - **Frontend**: Next.js App Router. Server Components for static layout; Client Components (`"use client"`) for anything with interactive state (panels, toggles, forms). No global state manager — each interactive component owns its local `useState`.
-- **Backend**: FastAPI, layered `api/v1` (routers) → `services` (business logic) → `schemas` (Pydantic contracts) → `services/store.py` (in-memory fixture "database," seeded with the same demo data that used to be hardcoded in the frontend). Contract: the frontend consumes the backend "exactly as if it were production," so swapping the fixture store for a real database and the fixture-backed `diagnosis_service`/`insight_service` for the future RAG pipeline requires no frontend rewrite — see `BACKEND_INTEGRATION_PLAN.md`.
+- **Backend**: FastAPI, layered `api/v1` (routers) → `services` (business logic) → `schemas` (Pydantic contracts) → `models`/`db` (SQLAlchemy 2.x ORM models, Postgres). Persistence via Alembic migrations against a local Postgres run through `docker-compose.yml`; seeded with the same demo data that used to be hardcoded in the frontend. Contract: the frontend consumes the backend "exactly as if it were production," so swapping the fixture-backed `diagnosis_service`/`insight_service` for the future RAG pipeline requires no frontend rewrite — see `BACKEND_INTEGRATION_PLAN.md`.
 - **Data flow today**: The Assessment screen fetches its initial data (patient summary, assessment/diagnosis, findings, insights) server-side from FastAPI in an async Server Component, then hands off to TanStack Query on the client for interactivity — delete/relabel findings, diagnosis actions, status transitions, and "Log a test" are all real mutations against the backend's in-memory store (optimistic UI on delete/relabel, with rollback on error). No hardcoded finding/diagnosis/insight data remains in frontend components.
 - **Repo layout**: `frontend/` and `backend/` as sibling directories at repo root (see Folder Structure).
 
@@ -32,6 +32,9 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 - FastAPI 0.116.1
 - Uvicorn 0.35.0 (`[standard]`)
 - pydantic-settings 2.7.1 (env-driven config)
+- SQLAlchemy 2.0.36 (ORM), Alembic 1.14.0 (migrations), psycopg 3.2.3 (Postgres driver)
+- Postgres 16, run locally via `docker-compose.yml`
+- pytest 8.3.4 + httpx 0.28.1 (`TestClient`) — first automated test suite in the repo, `backend/tests/`
 - Python 3.13, isolated via `backend/.venv`
 
 **Data fetching (frontend)**
@@ -41,6 +44,7 @@ Long-term vision (not yet started): an AI-powered clinical reasoning pipeline (R
 - ESLint 9 (flat config)
 - npm (frontend package manager)
 - pip + venv (backend dependency management)
+- Docker Desktop (local Postgres)
 
 ## Folder Structure
 
@@ -85,8 +89,13 @@ PTeeHealth/
     │   ├── __init__.py
     │   ├── main.py                       # FastAPI app factory, CORS, /health, mounts /api/v1
     │   ├── core/
-    │   │   ├── config.py                 # pydantic-settings (ALLOWED_ORIGINS)
-    │   │   └── deps.py                   # get_current_user no-op stub (Phase 5 auth seam)
+    │   │   ├── config.py                 # pydantic-settings (ALLOWED_ORIGINS, DATABASE_URL)
+    │   │   └── deps.py                   # get_db() session dependency; get_current_user no-op stub (auth seam)
+    │   ├── db/
+    │   │   ├── base.py                   # SQLAlchemy DeclarativeBase, imports all models for Alembic autogenerate
+    │   │   └── session.py                # engine, SessionLocal, get_db()
+    │   ├── models/                       # SQLAlchemy ORM models, one file per table
+    │   │   ├── patient.py, assessment_session.py, legacy_finding.py, legacy_test.py
     │   ├── api/v1/
     │   │   ├── router.py                 # aggregates all /api/v1 routers
     │   │   ├── patients.py
@@ -102,15 +111,24 @@ PTeeHealth/
     │   │   ├── finding.py
     │   │   ├── test.py
     │   │   └── insight.py
-    │   └── services/                     # business logic + fixture store
-    │       ├── store.py                  # in-memory fixture "database," seeded with demo patient/assessment
+    │   └── services/                     # business logic, DB-backed via SQLAlchemy Session
     │       ├── patients.py
     │       ├── assessments.py
     │       ├── findings.py
     │       ├── tests.py
-    │       └── insights.py               # Phase 4 RAG seam
+    │       └── insights.py               # future RAG seam
+    ├── alembic/
+    │   ├── env.py                        # reads DATABASE_URL from Settings, targets Base.metadata
+    │   ├── script.py.mako
+    │   └── versions/
+    │       ├── 0001_initial_schema.py    # patients, assessment_sessions, findings, logged_tests
+    │       └── 0002_seed_demo_data.py    # patient-1 / assessment-1 / 5 findings
+    ├── alembic.ini
+    ├── docker-compose.yml                # local Postgres 16, host port 5433
+    ├── tests/                            # pytest + httpx.TestClient, one file per router, real Postgres test DB
+    ├── pytest.ini
     ├── requirements.txt
-    ├── .env.example                      # documents ALLOWED_ORIGINS
+    ├── .env.example                      # documents ALLOWED_ORIGINS, DATABASE_URL
     └── .gitignore
 ```
 
@@ -144,7 +162,7 @@ PTeeHealth/
 
 ## Backend APIs Implemented
 
-All under `/api/v1`, fixture/in-memory-backed (no real database yet — see `BACKEND_INTEGRATION_PLAN.md` Phase 3). Seeded with one demo patient (`patient-1`, Ankita Sharma) and one demo assessment (`assessment-1`) matching the data that used to be hardcoded in the frontend.
+All under `/api/v1`, Postgres-backed via SQLAlchemy + Alembic (data now survives a backend restart — the in-memory fixture store from Phase 2 has been fully removed). Seeded via Alembic migration with one demo patient (`patient-1`, Ankita Sharma) and one demo assessment (`assessment-1`) matching the data that used to be hardcoded in the frontend.
 
 | Endpoint | Method | Status |
 |---|---|---|
@@ -169,7 +187,7 @@ None. No AI/LLM calls, no RAG pipeline, no vector database, no embeddings anywhe
 
 Not deployed. Verified locally only:
 - Frontend: `npm run build` / `npm run dev` / `npm run start`
-- Backend: `uvicorn app.main:app --reload`
+- Backend: `uvicorn app.main:app --reload` against a local Postgres (`docker compose up -d` + `alembic upgrade head`)
 
 Deployment plan was discussed but not executed: Vercel for the frontend (root directory `frontend`, no env vars needed yet since there's no live API integration), Render (or similar, not Vercel serverless) for the backend once real AI/RAG workloads exist, connected via `ALLOWED_ORIGINS` / `NEXT_PUBLIC_API_BASE_URL`. No CI/CD, no hosting accounts configured.
 
@@ -178,10 +196,11 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 - Build Treatment, Home Plan, and Evaluation tab content (frontend UI + backend routes, per `BACKEND_INTEGRATION_PLAN.md` Phase 3).
 - Swap the placeholder Tailwind palette (default shadcn neutral tokens) for the actual Lovable design tokens/hex values once provided.
 - Real voice capture for mic buttons (currently visual-only toggles); backend `/voice/*` endpoints (Phase 4).
-- Real database (Postgres via SQLAlchemy/Alembic) to replace the in-memory fixture store in `backend/app/services/store.py` (Phase 3) — current data does not survive a backend restart.
-- Real auth, multi-clinician / senior-review workflow (Phase 5) — `get_current_user` is currently a wired-in no-op.
-- RAG pipeline behind `diagnosis_service`/`insight_service` (Phase 4).
-- Deployment execution (Vercel + backend host) once there's a live integration worth deploying.
+- Real auth, multi-clinician / senior-review workflow — `get_current_user` is currently a wired-in no-op.
+- RAG pipeline behind `diagnosis_service`/`insight_service`.
+- Deployment execution (Vercel + backend host) once there's a live integration worth deploying — the local Postgres setup (`docker-compose.yml`) is dev-only; production DB hosting is unaddressed.
+- Frontend automated test suite (still none — Jest/Vitest not evaluated yet); backend now has one (`backend/tests/`, pytest).
+- Richer data model per the PDF-derived backend Plan of Action (structured demographics, per-visit Intake Form, joint/muscle findings, Recommendation/Working-Diagnosis/Confidence engines, session lifecycle, treatment handoff, email/WhatsApp logging) — persistence migration (this entry's Change Log item) is the first phase of that plan; remaining phases not yet started.
 - Patient selection / routing UI — the Assessment screen currently always points at the one seeded demo patient/assessment (`DEFAULT_PATIENT_ID`/`DEFAULT_ASSESSMENT_ID` in `frontend/src/lib/constants.ts`); becomes a route param once patient list/creation UI exists.
 
 ## Known Issues
@@ -219,3 +238,10 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
   - Added TanStack Query (`@tanstack/react-query`) to the frontend, a typed `lib/api.ts` fetch client, and `lib/constants.ts` for the (temporary, pre-patient-routing) default patient/assessment IDs.
   - Converted `assessment/page.tsx` to an async Server Component that fetches patient/assessment/findings/insights from FastAPI, passed down as React Query `initialData`. `PteeAssistantPanel`, `FindingsList`, and `InsightsPanel` now read live backend state and issue real mutations (delete/relabel findings with optimistic updates + rollback, diagnosis agree/update/fully-change, status reviewing↔completed, log-a-test submission) instead of owning hardcoded local state.
   - Verified: `npm run lint` and `npm run build` clean; backend endpoints round-tripped via curl (including PATCH/DELETE/POST mutations and assessment version bumping); full browser verification via a headless-Chromium Playwright script confirmed the rendered page is pixel-identical to the pre-integration version, and that deleting a finding removes it and the removal survives a page reload (proving the mutation persists server-side, not just in local UI state) with zero console errors.
+- **2026-08-04** — A PDF spec (`Data Flow.pdf`) proposing the full target data model and backend orchestration flow (structured demographics, per-visit Intake Form, joint/muscle/clinical findings, Recommendation/Working-Diagnosis/Confidence engines, session lifecycle, treatment handoff, email/WhatsApp logging) was analyzed and turned into a detailed Plan of Action (backend folder structure, DB schema, API design, phased build sequence, risks/open questions) — confirmed scope with the user: rule-based engine stubs (no LLM yet), no voice capture yet, backend-first with frontend UI changes deferred, and Cancel soft-closes a session without ever deleting the patient record (overriding the PDF's literal "Patient details deleted" wording, flagged and confirmed rather than assumed).
+- **2026-08-04** — Implemented Phase 1 of that plan (Persistence Migration) end-to-end:
+  - Replaced the in-memory `services/store.py` fixture with Postgres 16 (via `docker-compose.yml`, host port 5433 to avoid clashing with any native Postgres) + SQLAlchemy 2.x models (`app/models/`) + Alembic migrations (`app/db/`, `alembic/`). The former `assessments` fixture table is now `assessment_sessions` in the DB (API path `/assessments/...` unchanged) — a deliberate rename to give later phases (which FK everything to a session) a stable anchor from day one.
+  - Two migrations: `0001_initial_schema` (patients, assessment_sessions, findings, logged_tests) and `0002_seed_demo_data` (reproduces patient-1/assessment-1/5 findings exactly, so upgrading a fresh DB is behavior-neutral for local dev).
+  - Rewrote all four services (`patients`, `assessments`, `findings`, `tests`) plus `insights` to be DB-backed via SQLAlchemy `Session`, injected into every route via a new `get_db()` FastAPI dependency; `core/config.py` gained `database_url` and now actually loads `backend/.env` (previously `Settings` had no `env_file` configured despite `.env.example` implying it did — fixed as part of this work).
+  - Added the repo's first-ever automated test suite: `backend/tests/` (pytest + `httpx.TestClient`, 30 tests covering all 17 `/api/v1` routes' happy paths and 404 cases), running against a real dedicated `ptee_health_test` Postgres database (not mocks, not SQLite) with per-test transaction rollback for isolation.
+  - Verified: all 30 pytest tests pass; `alembic upgrade head` on a fresh DB reproduces the old fixture's exact JSON responses byte-for-byte (confirmed via curl diff against the pre-migration output); `npm run build` clean; a production frontend build/start pointed at the new Postgres-backed backend confirmed server-side rendering still pulls live data correctly (patient name, findings, insights all present in the SSR HTML).

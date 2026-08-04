@@ -5,12 +5,14 @@ findings/tests + an LLM call replaces the hardcoded response below, but the
 return shape (and therefore the route and frontend contract) doesn't change.
 """
 
+from sqlalchemy.orm import Session
+
+from app.models.assessment_session import AssessmentSession
 from app.schemas.insight import InsightTag, Insights
-from app.services.store import ASSESSMENTS
 
 
-def get_insights(assessment_id: str) -> Insights | None:
-    if assessment_id not in ASSESSMENTS:
+def get_insights(db: Session, assessment_id: str) -> Insights | None:
+    if db.get(AssessmentSession, assessment_id) is None:
         return None
     return Insights(
         assessment_id=assessment_id,

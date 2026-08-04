@@ -28,15 +28,19 @@ Current implementation:
   findings, diagnosis actions, status toggling, log-a-test).
 - **Backend**: FastAPI, layered `api/v1` (routers) → `services` (business
   logic) → `schemas` (Pydantic contracts, camelCase over the wire) →
-  `services/store.py` (in-memory fixture store, seeded with one demo patient
-  and assessment). **No real database yet** — backend state resets on
-  restart. See the Backend APIs table in `Progress.md` for the full endpoint
-  list.
+  `models`/`db` (SQLAlchemy 2.x, **Postgres-backed** — persistence via
+  `docker-compose.yml` + Alembic migrations). Data now survives a backend
+  restart. Seeded with one demo patient (`patient-1`, Ankita Sharma) and one
+  demo assessment (`assessment-1`) via an Alembic data migration. See the
+  Backend APIs table in `Progress.md` for the full endpoint list.
 - **No AI/RAG yet.** Working diagnosis, confidence, and insights are served
   by the backend but are still static fixture data, not model-generated.
   `app/services/insights.py` and the diagnosis fields in
-  `app/services/assessments.py` are the seams reserved for that (Phase 4).
-- **No auth, no persistence, no deployment yet** (Phases 3, 5).
+  `app/services/assessments.py` are the seams reserved for that (a later
+  phase — see `BACKEND_INTEGRATION_PLAN.md`).
+- **No auth, no deployment yet.**
+- **Automated tests exist now**: `backend/tests/` (pytest + `httpx.TestClient`,
+  runs against a real Postgres test database) — see Testing below.
 
 ## Prerequisites
 
@@ -45,6 +49,7 @@ Current implementation:
 | Node.js | 20+ | Next.js 16 requirement |
 | npm | bundled with Node | |
 | Python | 3.13 | matches `backend/.venv` |
+| Docker Desktop | any recent | runs the local Postgres database via `docker-compose.yml` |
 | Git | any recent | |
 | PowerShell | 5.1+ (Windows) | commands below use PowerShell syntax |
 
@@ -54,6 +59,7 @@ Verify what you have:
 node --version
 npm --version
 py -3.13 --version
+docker --version
 git --version
 ```
 
@@ -74,7 +80,27 @@ Set-Location ..
 Set-Location frontend
 npm install
 Set-Location ..
+
+# 3. Database: start Postgres (Docker Desktop must be running first)
+Set-Location backend
+docker compose up -d
+Set-Location ..
 ```
+
+### Database migrations (one-time, and whenever new migrations are added)
+
+With Postgres running (step 3 above):
+
+```powershell
+Set-Location backend
+.\.venv\Scripts\python.exe -m alembic upgrade head
+Set-Location ..
+```
+
+This creates the schema and seeds the same demo patient/assessment data that
+used to be hardcoded in `store.py` — behavior-neutral for local dev. Data
+now **persists** across backend restarts (a real change from earlier: the
+old in-memory fixture store reset every restart, Postgres doesn't).
 
 ### Environment files
 
@@ -100,9 +126,19 @@ Copy-Item frontend\.env.example frontend\.env.local
 
 ## Running Locally
 
-**Start the backend first** — `/assessment` fetches from it server-side on
-first load and will 500 if it's not up yet. Use two separate PowerShell
-windows/tabs (both commands are long-running and block the terminal).
+**Start Postgres, then the backend, then the frontend** — `/assessment`
+fetches from the backend server-side on first load (500s if it's not up),
+and the backend now needs Postgres reachable to start meaningfully (it'll
+still boot with Postgres down, but every route will fail). Use two separate
+PowerShell windows/tabs for the two long-running dev servers.
+
+**Database** (from the repo root, if not already running from setup):
+
+```powershell
+Set-Location backend
+docker compose up -d
+Set-Location ..
+```
 
 **Terminal 1 — backend** (from the repo root):
 
@@ -134,12 +170,29 @@ Get-NetTCPConnection -LocalPort 8000 -State Listen | ForEach-Object { Stop-Proce
 Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 ```
 
-## Testing
-
-There is no automated test suite yet (no pytest, no Jest/Vitest) — "testing"
-today means static checks plus the manual verification checklist below.
+Postgres keeps running in the background (Docker) even after you stop the
+app servers — that's fine, leave it running between sessions, or:
 
 ```powershell
+Set-Location backend
+docker compose stop   # stops the container, keeps data
+# docker compose down    # stops + removes the container (data volume survives)
+Set-Location ..
+```
+
+## Testing
+
+**Backend automated tests exist now** (`backend/tests/`, pytest +
+`httpx.TestClient`) — the frontend still has no automated test suite (no
+Jest/Vitest), so frontend "testing" remains static checks plus the manual
+checklist below.
+
+```powershell
+# Backend: automated test suite (needs Postgres running — see Local Setup)
+Set-Location backend
+.\.venv\Scripts\python.exe -m pytest -v
+Set-Location ..
+
 # Frontend: lint (ESLint flat config)
 Set-Location frontend
 npm run lint
@@ -153,6 +206,11 @@ Set-Location backend
 .\.venv\Scripts\python.exe -c "from app.main import app; print([r.path for r in app.routes])"
 Set-Location ..
 ```
+
+The pytest suite creates its own `ptee_health_test` database automatically
+on the same Postgres server (doesn't touch your dev data in `ptee_health`),
+and each test runs inside a transaction that's rolled back afterward — safe
+to run repeatedly, no manual cleanup needed.
 
 ### Backend API smoke test (curl)
 
@@ -172,8 +230,10 @@ every endpoint (including PATCH/POST/DELETE mutations) by hand.
 ## Manual Verification Checklist
 
 Run through this after any change that touches data flow, routing, or the
-Assessment screen. Restart both servers first for a clean baseline (fixture
-data resets on backend restart).
+Assessment screen. To reset to a clean baseline, re-run the seed migration
+(`docker compose down -v` to wipe the volume, then `docker compose up -d` +
+`alembic upgrade head` again) — a plain backend restart no longer resets
+data, since it's Postgres-backed now.
 
 **Backend / API connectivity**
 - [ ] `GET /health` → `200 {"status":"ok"}`
@@ -202,7 +262,8 @@ data resets on backend restart).
 
 **Data flow / state management**
 - [ ] Editing a finding in one browser tab and reloading a second tab shows the same change (proves shared backend state, not per-tab local state)
-- [ ] Restarting the backend resets all data back to the seeded Ankita Sharma fixture (expected — no persistence yet, not a bug)
+- [ ] Restarting the backend (`Ctrl+C` + re-run `uvicorn`) **keeps** all prior edits — data now persists in Postgres, this is the opposite of the old fixture-store behavior and confirms the DB is actually being used
+- [ ] `docker compose down -v` + `docker compose up -d` + `alembic upgrade head` restores the clean seeded baseline (Ankita Sharma, 5 findings)
 
 **Error handling**
 - [ ] Stop the backend, then load `/assessment` → should fail loudly (visible Next.js error overlay/500), not silently render stale/empty data
@@ -210,6 +271,31 @@ data resets on backend restart).
 - [ ] Browser devtools console has **zero** uncaught errors during normal use of the checklist above
 
 ## Troubleshooting
+
+**Backend fails to start / every route 500s with a connection error**
+Postgres isn't running. `docker compose up -d` from `backend/` (Docker
+Desktop must be open first — it does not auto-start). Confirm with
+`docker ps` — you should see `ptee_health_postgres` as `Up`/`healthy`.
+
+**`docker compose up -d` fails to bind port 5433, or Postgres data looks wrong**
+`docker-compose.yml` publishes Postgres on host port **5433**, not 5432,
+specifically to avoid clashing with a native Postgres install. If you have
+something else already on 5433, change the port mapping in
+`backend/docker-compose.yml` and update `DATABASE_URL` (env var or
+`backend/.env`) to match.
+
+**`alembic upgrade head` fails with a connection error**
+Same root cause as above — Postgres isn't reachable yet. Also confirm
+`DATABASE_URL` (default: `postgresql+psycopg://ptee:ptee@localhost:5433/ptee_health`,
+matching `docker-compose.yml`'s defaults) hasn't been overridden to point
+somewhere stale in your shell environment or `backend/.env`.
+
+**`pytest` fails with a connection/database error**
+Same prerequisite — Postgres must be running (`docker compose up -d`). The
+test suite creates its own `ptee_health_test` database on first run; if
+that database gets into a bad state, drop it manually
+(`docker exec -it ptee_health_postgres psql -U ptee -d postgres -c 'DROP DATABASE ptee_health_test;'`)
+and re-run — it'll be recreated automatically.
 
 **`Activate.ps1 cannot be loaded because running scripts is disabled`**
 Don't activate the venv — call its `python.exe` directly instead, as shown
@@ -227,6 +313,22 @@ If `Stop-Process` can't find that PID (rare orphaned-socket state), just run
 the backend on a different port (`--port 8010`) and set
 `NEXT_PUBLIC_API_BASE_URL` to match — don't spend time fighting a phantom
 listener.
+
+**Page shows stale/placeholder content that doesn't match the source**
+(e.g. `/` renders a bare `PTee Health` line instead of the hero section, and
+the Next.js dev indicator badge shows "N — 1 Issue" in the bottom-left
+corner) — the `npm run dev` process serving that tab has been running since
+before the relevant files changed and Turbopack's HMR didn't fully
+reconcile. Stop it and start a fresh one:
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <OwningProcess> -Force
+Set-Location frontend
+npm run dev
+```
+Then hard-refresh the browser tab. If restarting doesn't fix it, also clear
+Turbopack's cache: `Remove-Item frontend\.next -Recurse -Force` before
+restarting.
 
 **Frontend: `Another next dev server is already running` / port 3000 busy**
 Same idea — a previous `npm run dev` is still holding the port:
