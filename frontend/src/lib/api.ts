@@ -72,6 +72,16 @@ export interface Insights {
   tags: InsightTag[];
 }
 
+export type NoteSource = "typed" | "voice";
+
+export interface DoctorNote {
+  id: string;
+  assessmentId: string;
+  content: string;
+  source: NoteSource;
+  createdAt: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -150,4 +160,12 @@ export const api = {
     }),
 
   getInsights: (assessmentId: string) => request<Insights>(`/assessments/${assessmentId}/insights`),
+
+  getNotes: (assessmentId: string) => request<DoctorNote[]>(`/assessments/${assessmentId}/notes`),
+
+  createNote: (assessmentId: string, data: { content: string; source?: NoteSource }) =>
+    request<DoctorNote>(`/assessments/${assessmentId}/notes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };

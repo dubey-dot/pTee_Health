@@ -3,11 +3,12 @@ import { api } from "@/lib/api";
 import { DEFAULT_ASSESSMENT_ID, DEFAULT_PATIENT_ID } from "@/lib/constants";
 
 export default async function AssessmentPage() {
-  const [patient, assessment, findings, insights] = await Promise.all([
+  const [patient, assessment, findings, insights, notes] = await Promise.all([
     api.getPatient(DEFAULT_PATIENT_ID),
     api.getAssessment(DEFAULT_ASSESSMENT_ID),
     api.getFindings(DEFAULT_ASSESSMENT_ID),
     api.getInsights(DEFAULT_ASSESSMENT_ID),
+    api.getNotes(DEFAULT_ASSESSMENT_ID),
   ]);
 
   return (
@@ -16,6 +17,7 @@ export default async function AssessmentPage() {
       assessment={assessment}
       findings={findings}
       insights={insights}
+      notes={notes}
     />
   );
 }

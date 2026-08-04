@@ -9,10 +9,11 @@ export default async function AssessmentByIdPage({
   const { assessmentId } = await params;
 
   const assessment = await api.getAssessment(assessmentId);
-  const [patient, findings, insights] = await Promise.all([
+  const [patient, findings, insights, notes] = await Promise.all([
     api.getPatient(assessment.patientId),
     api.getFindings(assessmentId),
     api.getInsights(assessmentId),
+    api.getNotes(assessmentId),
   ]);
 
   return (
@@ -21,6 +22,7 @@ export default async function AssessmentByIdPage({
       assessment={assessment}
       findings={findings}
       insights={insights}
+      notes={notes}
     />
   );
 }

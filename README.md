@@ -50,6 +50,13 @@ Current implementation:
   other endpoint is unaffected, and the UI degrades to a visible error
   message rather than crashing. No RAG/vector DB yet — this is a single
   structured-output call over the current patient/findings, not retrieval.
+- **Doctor's Notes are real now**: the Patient Summary card's "Doctor's
+  Notes" section supports both typed and voice-dictated notes, persisted
+  per-assessment via `POST /assessments/{id}/notes`. Voice-to-text runs
+  entirely client-side via the browser's Web Speech API (no new backend
+  dependency) — the mic button transcribes into the same text field the
+  doctor can review/edit before saving, and falls back to a visible inline
+  message in browsers that don't support it (e.g. Firefox, Safari).
 - **No auth, no deployment yet.**
 - **Automated tests exist now**: `backend/tests/` (pytest + `httpx.TestClient`,
   runs against a real Postgres test database) — see Testing below.
@@ -164,7 +171,7 @@ Set-Location ..
 
 ```powershell
 Set-Location backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 Leave this running. You should see `Application startup complete.` and
@@ -296,6 +303,14 @@ curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac69
 curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/tests -H "Content-Type: application/json" -d "{\"type\":\"joint\",\"name\":\"Single leg bridge\",\"result\":\"Weak on right\"}"
 ```
 
+**Add a doctor's note against that assessment** — `source` is optional
+(`"typed"` or `"voice"`, defaults to `"typed"`; the frontend sets `"voice"`
+itself when the note came from the mic button):
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/notes -H "Content-Type: application/json" -d "{\"content\":\"Patient reports improved ROM since last visit.\"}"
+```
+
 **What to check on each response:**
 - Status `201`, and the JSON body echoes back what you sent plus a
   generated `id` and any FK field (`patientId`/`assessmentId`) filled in.
@@ -308,7 +323,8 @@ curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac69
 **Automated coverage:** every one of these POST endpoints already has
 passing tests in `backend/tests/` — see `test_patients.py::test_create_patient`,
 `test_assessments.py::test_create_assessment`, `test_findings.py::test_create_finding`,
-and `test_tests.py::test_create_test`. Running `pytest` (see Testing above)
+`test_tests.py::test_create_test`, and `test_notes.py::test_create_note_typed`.
+Running `pytest` (see Testing above)
 re-verifies all of this automatically without leaving data behind (each
 test rolls back). The curl walkthrough above is for manual/exploratory
 testing and *does* leave real rows in your dev database — there's no
@@ -331,7 +347,7 @@ data, since it's Postgres-backed now.
 - [ ] `GET /api/v1/assessments/assessment-1/findings` → 200, 5 findings, first one (`pelvis-shift`) has a non-null `detail`
 - [ ] `GET /api/v1/assessments/assessment-1/insights` → 200, non-empty `summary` (`tags` is `[]` until `/diagnosis/generate` has been run at least once — expected, not a bug)
 - [ ] A GET for a nonexistent ID (e.g. `/api/v1/patients/does-not-exist`) → 404, not a 500
-- [ ] `/docs` (Swagger UI) loads and lists all routers: patients, assessments, findings, diagnosis, tests, insights
+- [ ] `/docs` (Swagger UI) loads and lists all routers: patients, assessments, findings, diagnosis, tests, insights, notes
 
 **Frontend routing**
 - [ ] `/` loads, hero headline rotates between two variants every ~4s
@@ -365,6 +381,13 @@ data, since it's Postgres-backed now.
 - [ ] Without `ANTHROPIC_API_KEY` set: clicking it shows a spinner, then a visible red error message under the button; existing diagnosis/confidence/insights are **unchanged**, not cleared; the button re-enables and can be retried
 - [ ] `POST /api/v1/assessments/assessment-1/diagnosis/generate` with no key configured → `502`, body contains `"ANTHROPIC_API_KEY is not configured"` — not a `500`
 - [ ] With a real key configured: clicking it updates the diagnosis text, confidence meter, and Insights panel content together (one call generates all three); `GET /assessments/assessment-1/insights` afterward returns the newly generated `tags`, no longer `[]`
+
+**Doctor's Notes**
+- [ ] Patient Summary card's "Doctor's Notes" header count starts at the real note count (`0` on a fresh assessment), not a hardcoded number
+- [ ] Typing a note and clicking "Save note" adds it to the list immediately, clears the textarea, and increments the count — **and it's still there after a page reload** (proves it's persisted via `POST /assessments/{id}/notes`, not local state)
+- [ ] Clicking the mic button in a browser that supports the Web Speech API (Chrome/Edge desktop, with mic permission granted) starts listening (button turns solid/shows a stop icon), transcribes speech into the same textarea, and stops on click again or on its own after a pause
+- [ ] Clicking the mic button in a browser/environment where the Web Speech API is unavailable (e.g. headless automation, Firefox, Safari) shows the inline "Voice input isn't supported in this browser" message instead of throwing — verified via headless-browser Playwright testing, since real microphone dictation can't be exercised outside a real browser session with mic access
+- [ ] A note saved via the mic shows a "· dictated" tag next to its timestamp in the list; a typed note doesn't
 - [ ] Diagnosis Agree/Update/Fully-change buttons and the generate button don't interfere with each other — both write to the same `Assessment`, and the UI reflects whichever ran last
 
 **Error handling**
@@ -432,6 +455,19 @@ the backend on a different port (`--port 8010`) and set
 `NEXT_PUBLIC_API_BASE_URL` to match — don't spend time fighting a phantom
 listener.
 
+**Backend: uvicorn keeps printing `Reloading...` / `CancelledError` / `KeyboardInterrupt` in a loop and never settles**
+Not a crash — each cycle still ends with `Application startup complete`; the
+traceback is just uvicorn's normal (harmless) teardown of the *previous*
+worker process each time `--reload` fires. The real problem is *why* it keeps
+firing: by default `--reload` watches the entire working directory, including
+`.venv/Lib/site-packages` — and since this project lives under OneDrive,
+background sync continuously touches file timestamps inside `.venv`
+(including the `anthropic` SDK's own source files), which WatchFiles reads as
+changes and reloads on. Fixed by scoping the watch to `app/` only
+(`--reload-dir app`, already reflected in the run commands above). If it's
+still noisy, quit OneDrive syncing for this folder or move the project
+outside OneDrive entirely.
+
 **Page shows stale/placeholder content that doesn't match the source**
 (e.g. `/` renders a bare `PTee Health` line instead of the hero section, and
 the Next.js dev indicator badge shows "N — 1 Issue" in the bottom-left
@@ -462,7 +498,7 @@ the frontend on port 3000 (the default the backend already allows), or set
 backend:
 ```powershell
 $env:ALLOWED_ORIGINS = "http://localhost:3000,http://localhost:3010"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 **`/assessment` fails with `API GET /patients/patient-1 failed: 404`**

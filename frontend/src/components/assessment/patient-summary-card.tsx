@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { ChevronUp, MessageSquare, Mail } from "lucide-react";
 
+import { DoctorNotesSection } from "@/components/assessment/doctor-notes-section";
+import type { DoctorNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export interface PatientSummaryField {
@@ -14,7 +16,8 @@ export interface PatientSummaryCardProps {
   name: string;
   fields: PatientSummaryField[];
   clinicalSummary: string;
-  doctorsNotesCount?: number;
+  assessmentId: string;
+  initialNotes?: DoctorNote[];
   defaultOpen?: boolean;
 }
 
@@ -22,7 +25,8 @@ export function PatientSummaryCard({
   name,
   fields,
   clinicalSummary,
-  doctorsNotesCount = 0,
+  assessmentId,
+  initialNotes,
   defaultOpen = true,
 }: PatientSummaryCardProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -83,14 +87,7 @@ export function PatientSummaryCard({
             <p className="mt-3 text-sm leading-6 text-slate-700">{clinicalSummary}</p>
           </section>
 
-          <section>
-            <h3 className="text-[11px] font-semibold tracking-wide text-slate-500">
-              DOCTOR&apos;S NOTES ({doctorsNotesCount})
-            </h3>
-            <p className="mt-3 text-sm italic text-slate-400">
-              Say &quot;note that…&quot; to dictate a verbatim clinical note.
-            </p>
-          </section>
+          <DoctorNotesSection assessmentId={assessmentId} initialNotes={initialNotes} />
         </div>
       )}
     </div>

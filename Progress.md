@@ -77,6 +77,7 @@ PTeeHealth/
 │   │   │   │   ├── assessment-screen.tsx      # shared render, used by both /assessment routes
 │   │   │   │   ├── assessment-tabs.tsx
 │   │   │   │   ├── patient-summary-card.tsx
+│   │   │   │   ├── doctor-notes-section.tsx   # useQuery/useMutation against /assessments/{id}/notes; mic button = client-side Web Speech API
 │   │   │   │   ├── ptee-assistant-panel.tsx   # useQuery/useMutation against /assessments/{id}
 │   │   │   │   ├── finding-row.tsx
 │   │   │   │   ├── findings-list.tsx          # useQuery/useMutation against /assessments/{id}/findings
@@ -104,7 +105,7 @@ PTeeHealth/
     │   │   ├── base.py                   # SQLAlchemy DeclarativeBase, imports all models for Alembic autogenerate
     │   │   └── session.py                # engine, SessionLocal, get_db()
     │   ├── models/                       # SQLAlchemy ORM models, one file per table
-    │   │   ├── patient.py, assessment_session.py, legacy_finding.py, legacy_test.py
+    │   │   ├── patient.py, assessment_session.py, legacy_finding.py, legacy_test.py, doctor_note.py
     │   ├── api/v1/
     │   │   ├── router.py                 # aggregates all /api/v1 routers
     │   │   ├── patients.py
@@ -112,20 +113,23 @@ PTeeHealth/
     │   │   ├── findings.py
     │   │   ├── diagnosis.py
     │   │   ├── tests.py                  # "log a test"
-    │   │   └── insights.py
+    │   │   ├── insights.py
+    │   │   └── notes.py                  # Doctor's Notes — GET/POST /assessments/{id}/notes
     │   ├── schemas/                      # Pydantic request/response models, camelCase over the wire
     │   │   ├── base.py                   # CamelModel — shared alias-generator base
     │   │   ├── patient.py
     │   │   ├── assessment.py
     │   │   ├── finding.py
     │   │   ├── test.py
-    │   │   └── insight.py
+    │   │   ├── insight.py
+    │   │   └── note.py                   # DoctorNote / DoctorNoteCreate, source: "typed" | "voice"
     │   └── services/                     # business logic, DB-backed via SQLAlchemy Session
     │       ├── patients.py
     │       ├── assessments.py            # + generate_diagnosis() — calls the Claude engine, persists result
     │       ├── findings.py
     │       ├── tests.py
     │       ├── insights.py               # reads persisted insight_summary/insight_tags, or a fallback pre-generation
+    │       ├── notes.py                  # list/create doctor notes, bumps assessment.version like tests.py
     │       └── engines/                  # AI seam — swappable behind a Protocol interface
     │           ├── base.py               # WorkingDiagnosisEngine Protocol, GeneratedAssessment/GeneratedInsightTag schemas
     │           ├── anthropic_client.py   # shared Anthropic client, explicit missing-key guard
@@ -136,7 +140,8 @@ PTeeHealth/
     │   └── versions/
     │       ├── 0001_initial_schema.py    # patients, assessment_sessions, findings, logged_tests
     │       ├── 0002_seed_demo_data.py    # patient-1 / assessment-1 / 5 findings
-    │       └── 0003_add_insight_fields.py  # assessment_sessions.insight_summary / insight_tags
+    │       ├── 0003_add_insight_fields.py  # assessment_sessions.insight_summary / insight_tags
+    │       └── 0004_add_doctor_notes.py    # doctor_notes table
     ├── alembic.ini
     ├── docker-compose.yml                # local Postgres 16, host port 5433
     ├── tests/                            # pytest + httpx.TestClient, one file per router, real Postgres test DB
@@ -158,7 +163,7 @@ PTeeHealth/
 - **Patient Intake / Assessment screen** (`/assessment`), pixel-matched from Lovable reference screenshots:
   - Top nav (logo, New Patients/Existing Patients/Dashboard, search, notifications, AI icon, avatar)
   - Assessment/Treatment/Home Plan/Evaluation tab strip + "Senior review" pill
-  - Collapsible Patient Summary card (patient fields, clinical summary, doctor's notes)
+  - Collapsible Patient Summary card (patient fields, clinical summary, Doctor's Notes — real per-assessment notes now, typed or voice-dictated, not static placeholder text)
   - PTee Assistant panel: confidence meter, Cancel/Working-diagnosis/Complete↔Completed toggle, diagnosis Agree/Update/Fully-change block, and the green Reopen-diagnosis/Go-to-treatment-plan banner in the completed state
   - Findings list: 5 mock findings, per-row delete, per-row mic toggle (visual only), expandable question+bullet detail (populated for one reference row), and a "Type finding instead" manual override that replaces the AI-suggested label inline
   - Log a Test panel: Joint/Muscle/Gait type selector, test name + optional result fields, disabled-until-valid Save button
@@ -195,8 +200,9 @@ All under `/api/v1`, Postgres-backed via SQLAlchemy + Alembic (data now survives
 | `/api/v1/assessments/{assessment_id}/diagnosis/generate` | POST | Implemented — real Claude Opus 5 call, generates + persists diagnosis, confidence, and insights together. `502` (not `500`) on any Anthropic failure, including a missing `ANTHROPIC_API_KEY` |
 | `/api/v1/assessments/{assessment_id}/tests` | GET, POST | Implemented — "Log a test" |
 | `/api/v1/assessments/{assessment_id}/insights` | GET | Implemented — reads persisted `insight_summary`/`insight_tags` if `/diagnosis/generate` has run; otherwise a "nothing generated yet" fallback (not the old fixture text) |
+| `/api/v1/assessments/{assessment_id}/notes` | GET, POST | Implemented — Doctor's Notes, one row per note, `source: "typed"\|"voice"`, ordered oldest-first |
 
-The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. The `POST /patients`, `GET /patients`, `POST /patients/{id}/assessments`, and `GET /patients/{id}/assessments` endpoints were already implemented but unused by the frontend until now — `lib/api.ts` gained `createPatient`/`listPatients`/`createAssessment`/`listAssessmentsForPatient` wrappers to actually call them (see New patient intake / Patients list / Patient detail screens above). Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), voice endpoints, and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content).
+The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. The `POST /patients`, `GET /patients`, `POST /patients/{id}/assessments`, and `GET /patients/{id}/assessments` endpoints were already implemented but unused by the frontend until now — `lib/api.ts` gained `createPatient`/`listPatients`/`createAssessment`/`listAssessmentsForPatient` wrappers to actually call them (see New patient intake / Patients list / Patient detail screens above). Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content). Voice now has one real integration — Doctor's Notes dictation, done entirely client-side via the Web Speech API (browser transcribes to text, backend never sees audio) — but there's still no backend voice/audio-upload endpoint of any kind, and no voice input anywhere else in the app (findings/tests mic buttons remain visual-only).
 
 ## AI & RAG Integration Progress
 
@@ -223,7 +229,7 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 
 - Build Treatment, Home Plan, and Evaluation tab content (frontend UI + backend routes, per `BACKEND_INTEGRATION_PLAN.md` Phase 3).
 - Swap the placeholder Tailwind palette (default shadcn neutral tokens) for the actual Lovable design tokens/hex values once provided.
-- Real voice capture for mic buttons (currently visual-only toggles); backend `/voice/*` endpoints (Phase 4).
+- Real voice capture for the *other* mic buttons (findings rows, Log a Test — still visual-only toggles); Doctor's Notes is the first one that's real (client-side Web Speech API, see Change Log). No backend `/voice/*` endpoint exists or is needed for that pattern — transcription happens in the browser, only the resulting text is sent to the backend.
 - Real auth, multi-clinician / senior-review workflow — `get_current_user` is currently a wired-in no-op.
 - RAG pipeline behind `diagnosis_service`/`insight_service` — a single Claude Opus 5 structured-output call now generates diagnosis/confidence/insights (see "AI & RAG Integration Progress" above), but it reasons only over the current session's own findings, not retrieval over a clinical knowledge base/vector DB. That retrieval layer is still not built.
 - Recommendation Engine ("what to test next") from the PDF-derived plan — not built; needs the richer structured-findings model (Phase 3 of `BACKEND_INTEGRATION_PLAN.md`'s successor plan) before there's data to reason over.
@@ -290,3 +296,11 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
   - **Bug found and fixed via live manual testing** (curl against the running backend with no `ANTHROPIC_API_KEY` set): the Anthropic SDK raises a bare `TypeError` at request-build time when no key is configured, not an `anthropic.APIStatusError`/`APIConnectionError` — the endpoint's except clause didn't catch it, so the failure surfaced as an unhandled `500` instead of a clear error. Fixed with an explicit upfront key check in `get_anthropic_client()` raising `RuntimeError`, caught alongside the real Anthropic exception types in the endpoint; re-verified via curl (`502` with an actionable message) and added a regression test (`test_generate_diagnosis_endpoint_502_when_api_key_missing`).
   - Verified: 36 pytest tests pass (real Postgres test DB, no mocked-out client at the HTTP layer — mocking happens at the service's `engine` parameter); `npm run lint`/`npm run build` clean; full headless-browser Playwright run against the live app with no `ANTHROPIC_API_KEY` configured (the actual out-of-the-box state in this environment) confirmed the "Generate with AI" button shows a loading state, the request returns `502`, the inline error message renders, the button re-enables, and the assessment's prior diagnosis/confidence are left untouched — the complete failure/degradation path, end to end. **Not verified**: the success path (an actual generated diagnosis from a real Claude API call) — no `ANTHROPIC_API_KEY` is available in this environment; the request/response contract was validated instead via the mocked-engine pytest suite plus a live schema-validation smoke check of the Anthropic call shape.
   - README.md updated in the same turn: Project Overview, Environment files (documenting `ANTHROPIC_API_KEY`), Manual Verification Checklist (new "AI generation" section), and Troubleshooting (the 502/missing-key scenario).
+- **2026-08-05** — Made the Doctor's Notes section on the Patient Summary card real (previously static placeholder text, no way to actually add a note):
+  - Backend: new `doctor_notes` table (migration `0004_add_doctor_notes`) — one row per note, FK'd to `assessment_sessions` (per-consultation, matching the `Finding`/`LoggedTest` pattern rather than being patient-wide), `content`, `source` (`"typed"` or `"voice"`), `created_at`. New `app/schemas/note.py`, `app/services/notes.py` (list/create, bumps `assessment.version` like `tests.py` does), and `app/api/v1/notes.py` — `GET`/`POST /assessments/{id}/notes`, `404` if the assessment doesn't exist.
+  - Frontend: new `components/assessment/doctor-notes-section.tsx` (replacing the static block inside `patient-summary-card.tsx`, which now takes `assessmentId`/`initialNotes` instead of the old `doctorsNotesCount` prop) — a textarea + mic button + "Save note" button, backed by `useQuery`/`useMutation` against the new endpoint. Notes render as a list above the input with a relative timestamp and a "· dictated" tag for voice-sourced ones.
+  - Voice-to-text runs entirely client-side via the browser's Web Speech API (`window.SpeechRecognition`/`webkitSpeechRecognition`, locally typed since it's not in TypeScript's DOM lib) — no backend change needed for this, since the browser does the transcription and only the resulting text is ever sent over the wire. Feature support is checked lazily at click time (not via a mount-detection `useEffect`, which the project's stricter `eslint-plugin-react-hooks` rule flags as a same-render-cycle `setState`-in-effect anti-pattern) — unsupported browsers get a visible inline fallback message instead of a silent failure or a disabled-on-first-render button that could itself cause a hydration mismatch.
+  - `PatientSummary.doctorsNotesCount` (a static integer column on `patients` that was never actually incremented by anything) is left in place on the backend for now — untouched, unused — since removing it would mean touching the patient model/schema/migrations for a field this feature doesn't need to touch; the frontend simply no longer reads it, using the real per-assessment note count instead.
+  - **Bug found and fixed via Playwright verification** (not via manual testing this time — the first browser run surfaced a React hydration-mismatch console error): each note's relative timestamp was formatted with `date.toLocaleString(undefined, {...})`, and an unspecified locale resolves differently between Node's ICU (server-side render) and the test browser's default locale (client-side render) — e.g. `"5 Aug, 3:13"` server-side vs. `"5 Aug, 3:13 am"` client-side — producing a real (if cosmetic) hydration mismatch on every page load with notes present. Fixed by pinning the locale explicitly to `"en-US"` instead of leaving it `undefined`; re-verified via Playwright with zero console errors.
+  - Verified: 42 backend pytest tests pass (36 prior + 6 new `test_notes.py` cases — create/list, ordering, `assessment.version` bump, `404` on a nonexistent assessment, both `source` values); `npm run lint`/`npm run build` clean; full headless-browser Playwright run against the live app — saved a typed note, confirmed a `201` response, the note appearing in the list, the header count incrementing, the textarea clearing, and the note still present after a full page reload (proving real backend persistence, not local state); clicking the mic button in headless Chromium (which has no working speech backend) didn't throw or break the page. **Not verified**: actual microphone dictation end-to-end (headless browser automation has no real audio input/speech service) — that requires a manual check in a real Chrome/Edge session with mic permission granted, called out explicitly in the README's Manual Verification Checklist rather than claimed as tested.
+  - README.md updated in the same turn: Project Overview, a new curl example under "Testing POST endpoints," the `/docs` router list, and a new "Doctor's Notes" Manual Verification Checklist section.

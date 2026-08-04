@@ -9,4 +9,10 @@ class Base(DeclarativeBase):
 # Base.metadata.create_all in tests) sees the full schema from this single
 # import. Models themselves must not import this module back except for
 # `Base` itself, to avoid circular imports.
-from app.models import assessment_session, legacy_finding, legacy_test, patient  # noqa: E402,F401
+from app.models import (  # noqa: E402,F401
+    assessment_session,
+    doctor_note,
+    legacy_finding,
+    legacy_test,
+    patient,
+)
