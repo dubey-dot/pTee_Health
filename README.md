@@ -40,11 +40,16 @@ Current implementation:
   restart. Seeded with one demo patient (`patient-1`, Ankita Sharma) and one
   demo assessment (`assessment-1`) via an Alembic data migration. See the
   Backend APIs table in `Progress.md` for the full endpoint list.
-- **No AI/RAG yet.** Working diagnosis, confidence, and insights are served
-  by the backend but are still static fixture data, not model-generated.
-  `app/services/insights.py` and the diagnosis fields in
-  `app/services/assessments.py` are the seams reserved for that (a later
-  phase — see `BACKEND_INTEGRATION_PLAN.md`).
+- **Real AI generation exists now**, gated behind `ANTHROPIC_API_KEY`. The
+  "Generate with AI" button on the Assessment screen calls
+  `POST /assessments/{id}/diagnosis/generate`, which runs one Claude Opus 5
+  call (structured outputs, `app/services/engines/working_diagnosis_engine.py`)
+  to produce the working diagnosis, confidence %, and insights summary/tags
+  together, and persists all of it. Without a configured key, that one
+  endpoint returns `502` with a clear message (see Troubleshooting) — every
+  other endpoint is unaffected, and the UI degrades to a visible error
+  message rather than crashing. No RAG/vector DB yet — this is a single
+  structured-output call over the current patient/findings, not retrieval.
 - **No auth, no deployment yet.**
 - **Automated tests exist now**: `backend/tests/` (pytest + `httpx.TestClient`,
   runs against a real Postgres test database) — see Testing below.
@@ -113,10 +118,11 @@ old in-memory fixture store reset every restart, Postgres doesn't).
 
 Both apps have sane defaults for local dev (backend allows
 `http://localhost:3000`; frontend calls `http://localhost:8000`), so **env
-files are optional unless you change ports**. To set them up anyway:
+files are optional unless you change ports, or want the AI "Generate with
+AI" button to actually work.** To set them up:
 
 ```powershell
-# Backend — controls ALLOWED_ORIGINS (CORS)
+# Backend — controls ALLOWED_ORIGINS (CORS), DATABASE_URL, ANTHROPIC_API_KEY
 Copy-Item backend\.env.example backend\.env
 
 # Frontend — controls NEXT_PUBLIC_API_BASE_URL
@@ -130,6 +136,13 @@ Copy-Item frontend\.env.example frontend\.env.local
 > `allowed_origins`). Copy the example file, or use
 > `[System.IO.File]::WriteAllText($path, $content, [System.Text.Encoding]::ASCII)`
 > if you must write it by hand.
+
+**AI generation (optional but recommended):** open `backend\.env` and set
+`ANTHROPIC_API_KEY=` to a real key from `https://platform.claude.com`.
+Without it, everything else in the app works normally — only the
+"Generate with AI" button on the Assessment screen fails, with a visible
+`502` error in the UI rather than a crash. Restart the backend after
+changing `.env` (it's only read at process startup).
 
 ## Running Locally
 
@@ -316,7 +329,7 @@ data, since it's Postgres-backed now.
 - [ ] `GET /api/v1/patients/patient-1` → 200, returns Ankita Sharma with all 9 summary fields populated
 - [ ] `GET /api/v1/assessments/assessment-1` → 200, `status: "completed"`, `confidence: 64`
 - [ ] `GET /api/v1/assessments/assessment-1/findings` → 200, 5 findings, first one (`pelvis-shift`) has a non-null `detail`
-- [ ] `GET /api/v1/assessments/assessment-1/insights` → 200, non-empty `summary` and `tags`
+- [ ] `GET /api/v1/assessments/assessment-1/insights` → 200, non-empty `summary` (`tags` is `[]` until `/diagnosis/generate` has been run at least once — expected, not a bug)
 - [ ] A GET for a nonexistent ID (e.g. `/api/v1/patients/does-not-exist`) → 404, not a 500
 - [ ] `/docs` (Swagger UI) loads and lists all routers: patients, assessments, findings, diagnosis, tests, insights
 
@@ -348,12 +361,28 @@ data, since it's Postgres-backed now.
 - [ ] Restarting the backend (`Ctrl+C` + re-run `uvicorn`) **keeps** all prior edits — data now persists in Postgres, this is the opposite of the old fixture-store behavior and confirms the DB is actually being used
 - [ ] `docker compose down -v` + `docker compose up -d` + `alembic upgrade head` restores the clean seeded baseline (Ankita Sharma, 5 findings)
 
+**AI generation ("Generate with AI" button)**
+- [ ] Without `ANTHROPIC_API_KEY` set: clicking it shows a spinner, then a visible red error message under the button; existing diagnosis/confidence/insights are **unchanged**, not cleared; the button re-enables and can be retried
+- [ ] `POST /api/v1/assessments/assessment-1/diagnosis/generate` with no key configured → `502`, body contains `"ANTHROPIC_API_KEY is not configured"` — not a `500`
+- [ ] With a real key configured: clicking it updates the diagnosis text, confidence meter, and Insights panel content together (one call generates all three); `GET /assessments/assessment-1/insights` afterward returns the newly generated `tags`, no longer `[]`
+- [ ] Diagnosis Agree/Update/Fully-change buttons and the generate button don't interfere with each other — both write to the same `Assessment`, and the UI reflects whichever ran last
+
 **Error handling**
 - [ ] Stop the backend, then load `/assessment` → should fail loudly (visible Next.js error overlay/500), not silently render stale/empty data
 - [ ] With backend running but frontend pointed at the wrong `NEXT_PUBLIC_API_BASE_URL`, browser console shows a clear fetch/CORS error, not a silent failure
 - [ ] Browser devtools console has **zero** uncaught errors during normal use of the checklist above
 
 ## Troubleshooting
+
+**"Generate with AI" button shows a red error / `POST .../diagnosis/generate` returns `502`**
+Almost always `ANTHROPIC_API_KEY` isn't set. Check the exact error text
+returned in the response body (or the red text under the button) —
+`"ANTHROPIC_API_KEY is not configured"` means the key is missing entirely
+(set it in `backend/.env`, see Environment files above, then restart the
+backend); any other message is a real upstream failure (bad key, network,
+rate limit, Anthropic outage) surfaced as-is from the `anthropic` SDK. This
+is the *only* endpoint in the app that depends on an external service —
+everything else keeps working normally regardless.
 
 **`curl.exe -d '{"key":"value"}'` from PowerShell returns `Expecting property name enclosed in double quotes`**
 PowerShell 5.1 mangles embedded double quotes when forwarding an argument to

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     allowed_origins: str = "http://localhost:3000"
     database_url: str = "postgresql+psycopg://ptee:ptee@localhost:5433/ptee_health"
+    anthropic_api_key: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:

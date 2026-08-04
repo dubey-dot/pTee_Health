@@ -6,6 +6,7 @@ import {
   Check,
   CircleCheck,
   Lightbulb,
+  Loader2,
   Pencil,
   RotateCcw,
   Sparkles,
@@ -63,6 +64,16 @@ export function PteeAssistantPanel({
     onSuccess: (updated) => queryClient.setQueryData(assessmentKey, updated),
   });
 
+  const generateMutation = useMutation({
+    mutationFn: () => api.generateDiagnosis(assessmentId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(assessmentKey, updated);
+      // Diagnosis generation also (re)writes the insights panel content —
+      // refetch it rather than trying to merge partial state in by hand.
+      queryClient.invalidateQueries({ queryKey: ["insights", assessmentId] });
+    },
+  });
+
   const { status, diagnosis, confidence, diagnosisAction } = assessment;
   const confidenceLabel = confidence >= 60 ? "Good" : confidence >= 40 ? "Fair" : "Low";
 
@@ -106,6 +117,20 @@ export function PteeAssistantPanel({
             <Lightbulb className="h-3.5 w-3.5" />
             Working diagnosis
           </button>
+          <button
+            type="button"
+            onClick={() => generateMutation.mutate()}
+            disabled={generateMutation.isPending}
+            title="Generate working diagnosis, confidence, and insights with AI"
+            className="flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3.5 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {generateMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {generateMutation.isPending ? "Generating…" : "Generate with AI"}
+          </button>
           {status === "reviewing" ? (
             <button
               type="button"
@@ -123,6 +148,13 @@ export function PteeAssistantPanel({
           )}
         </div>
       </div>
+
+      {generateMutation.isError && (
+        <p className="mt-3 text-sm text-red-600">
+          Couldn&apos;t generate a diagnosis. Check the backend has a valid ANTHROPIC_API_KEY
+          configured and try again.
+        </p>
+      )}
 
       {diagnosisOpen &&
         (status === "reviewing" ? (

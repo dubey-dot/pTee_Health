@@ -122,16 +122,21 @@ PTeeHealth/
     │   │   └── insight.py
     │   └── services/                     # business logic, DB-backed via SQLAlchemy Session
     │       ├── patients.py
-    │       ├── assessments.py
+    │       ├── assessments.py            # + generate_diagnosis() — calls the Claude engine, persists result
     │       ├── findings.py
     │       ├── tests.py
-    │       └── insights.py               # future RAG seam
+    │       ├── insights.py               # reads persisted insight_summary/insight_tags, or a fallback pre-generation
+    │       └── engines/                  # AI seam — swappable behind a Protocol interface
+    │           ├── base.py               # WorkingDiagnosisEngine Protocol, GeneratedAssessment/GeneratedInsightTag schemas
+    │           ├── anthropic_client.py   # shared Anthropic client, explicit missing-key guard
+    │           └── working_diagnosis_engine.py  # ClaudeWorkingDiagnosisEngine — real claude-opus-5 structured-output call
     ├── alembic/
     │   ├── env.py                        # reads DATABASE_URL from Settings, targets Base.metadata
     │   ├── script.py.mako
     │   └── versions/
     │       ├── 0001_initial_schema.py    # patients, assessment_sessions, findings, logged_tests
-    │       └── 0002_seed_demo_data.py    # patient-1 / assessment-1 / 5 findings
+    │       ├── 0002_seed_demo_data.py    # patient-1 / assessment-1 / 5 findings
+    │       └── 0003_add_insight_fields.py  # assessment_sessions.insight_summary / insight_tags
     ├── alembic.ini
     ├── docker-compose.yml                # local Postgres 16, host port 5433
     ├── tests/                            # pytest + httpx.TestClient, one file per router, real Postgres test DB
@@ -187,14 +192,24 @@ All under `/api/v1`, Postgres-backed via SQLAlchemy + Alembic (data now survives
 | `/api/v1/assessments/{assessment_id}/findings` | GET, POST | Implemented |
 | `/api/v1/findings/{finding_id}` | PATCH, DELETE | Implemented — relabel, delete |
 | `/api/v1/assessments/{assessment_id}/diagnosis` | GET, PATCH | Implemented — agree/update/fully-change actions |
+| `/api/v1/assessments/{assessment_id}/diagnosis/generate` | POST | Implemented — real Claude Opus 5 call, generates + persists diagnosis, confidence, and insights together. `502` (not `500`) on any Anthropic failure, including a missing `ANTHROPIC_API_KEY` |
 | `/api/v1/assessments/{assessment_id}/tests` | GET, POST | Implemented — "Log a test" |
-| `/api/v1/assessments/{assessment_id}/insights` | GET | Implemented (fixture summary/tags; Phase 4 RAG seam) |
+| `/api/v1/assessments/{assessment_id}/insights` | GET | Implemented — reads persisted `insight_summary`/`insight_tags` if `/diagnosis/generate` has run; otherwise a "nothing generated yet" fallback (not the old fixture text) |
 
 The Assessment screen now fetches all of the above from the backend instead of hardcoded frontend data — the gap called out below in earlier entries is closed. The `POST /patients`, `GET /patients`, `POST /patients/{id}/assessments`, and `GET /patients/{id}/assessments` endpoints were already implemented but unused by the frontend until now — `lib/api.ts` gained `createPatient`/`listPatients`/`createAssessment`/`listAssessmentsForPatient` wrappers to actually call them (see New patient intake / Patients list / Patient detail screens above). Not yet implemented: auth (`get_current_user` is a wired-in no-op stub), voice endpoints, and Treatment/Home Plan/Evaluation endpoints (their tabs still render no content).
 
 ## AI & RAG Integration Progress
 
-None. No AI/LLM calls, no RAG pipeline, no vector database, no embeddings anywhere in the codebase. Working diagnosis text, confidence percentage, and insight summaries are now served by the backend (`diagnosis`/`insights` fields on the `Assessment` fixture record and `insight_service.get_insights`) rather than hardcoded in frontend components, but the values themselves are still static fixture data, not produced by any model. `app/services/insights.py` and the diagnosis fields on `app/services/assessments.py` are the seams `BACKEND_INTEGRATION_PLAN.md` Phase 4 swaps for real RAG-backed generation, without changing the API contract.
+**Real LLM calls now exist** — no RAG/vector DB/embeddings yet, but the working-diagnosis/confidence/insights seam is no longer a fixture.
+
+- **Provider/model**: Anthropic Claude Opus 5 (`claude-opus-5`), official `anthropic` Python SDK, structured outputs (`client.messages.parse(output_format=...)` — the response *is* the validated Pydantic model, no free-text parsing).
+- **Where it lives**: `backend/app/services/engines/` — `base.py` (the `WorkingDiagnosisEngine` Protocol + `GeneratedAssessment`/`GeneratedInsightTag` schemas), `anthropic_client.py` (shared client, explicit missing-key guard), `working_diagnosis_engine.py` (`ClaudeWorkingDiagnosisEngine`, the real implementation, system prompt + structured-output call).
+- **One combined call, not three**: a single request generates diagnosis + confidence + insight summary/tags together (cheaper and more internally consistent than separate round trips reasoning over the same findings), triggered by `POST /assessments/{id}/diagnosis/generate` and surfaced in the UI as the "Generate with AI" button on `PteeAssistantPanel`.
+- **Persistence**: `assessment_sessions` gained `insight_summary`/`insight_tags` columns (migration `0003`) so a generated insight survives past the single request — `services/insights.py` reads them, falling back to a "nothing generated yet" placeholder (not fake AI-sounding text) until generation has run at least once.
+- **Failure handling**: any Anthropic failure (missing/invalid key, network, rate limit) returns `502` with a specific message — never a raw `500` — and leaves the assessment's existing diagnosis/confidence/insights untouched; verified via a real end-to-end browser test with no API key configured (the actual out-of-the-box state for a fresh clone).
+- **Requires `ANTHROPIC_API_KEY`** (`backend/.env`) to actually generate anything; every other endpoint in the app is unaffected by its absence.
+- **Testable without a real key**: `services/assessments.py::generate_diagnosis` takes an optional `engine` parameter for dependency injection — `backend/tests/test_diagnosis_generate.py` mocks it, no network calls in the test suite.
+- **Not built yet**: RAG/retrieval over clinical knowledge, a vector database, and the Recommendation Engine (the "what to test next" half of the PDF-derived plan's engine trio) — those still need the richer structured-findings data model from that plan's later phases before there's real data to reason over.
 
 ## Deployment Progress
 
@@ -210,7 +225,8 @@ Deployment plan was discussed but not executed: Vercel for the frontend (root di
 - Swap the placeholder Tailwind palette (default shadcn neutral tokens) for the actual Lovable design tokens/hex values once provided.
 - Real voice capture for mic buttons (currently visual-only toggles); backend `/voice/*` endpoints (Phase 4).
 - Real auth, multi-clinician / senior-review workflow — `get_current_user` is currently a wired-in no-op.
-- RAG pipeline behind `diagnosis_service`/`insight_service`.
+- RAG pipeline behind `diagnosis_service`/`insight_service` — a single Claude Opus 5 structured-output call now generates diagnosis/confidence/insights (see "AI & RAG Integration Progress" above), but it reasons only over the current session's own findings, not retrieval over a clinical knowledge base/vector DB. That retrieval layer is still not built.
+- Recommendation Engine ("what to test next") from the PDF-derived plan — not built; needs the richer structured-findings model (Phase 3 of `BACKEND_INTEGRATION_PLAN.md`'s successor plan) before there's data to reason over.
 - Deployment execution (Vercel + backend host) once there's a live integration worth deploying — the local Postgres setup (`docker-compose.yml`) is dev-only; production DB hosting is unaddressed.
 - Frontend automated test suite (still none — Jest/Vitest not evaluated yet); backend now has one (`backend/tests/`, pytest).
 - Richer data model per the PDF-derived backend Plan of Action (structured demographics, per-visit Intake Form, joint/muscle findings, Recommendation/Working-Diagnosis/Confidence engines, session lifecycle, treatment handoff, email/WhatsApp logging) — persistence migration (Phase 1) is the only phase done; remaining phases not yet started.
@@ -265,3 +281,12 @@ _(Ordered chronologically. Each entry is appended, never edited or removed, when
   - New dynamic route `/assessment/[assessmentId]` renders any assessment by id; extracted the shared rendering into `components/assessment/assessment-screen.tsx` so the original fixed `/assessment` route (still shows the seeded Ankita Sharma demo, kept for backward compatibility) and the new dynamic route don't duplicate markup.
   - Re-pointed the Home screen's mic button and `TopNav`'s "New Patients"/"Existing Patients" links (previously inert/pointed at `/`) to the new intake form and patient list respectively.
   - Verified: `npm run lint` and `npm run build` clean (7 routes registered correctly); full headless-browser Playwright run driving the real flow end-to-end — Home → mic → intake form → filled all 10 fields → submit → routed to a brand-new `/assessment/{id}` showing the just-entered patient data with a genuinely empty assessment (0 findings, `status: "reviewing"`, 0% confidence) → confirmed both the new patient and the original demo patient appear on `/patients` → confirmed the original `/assessment` demo route still renders unchanged. Zero console errors, zero failed network requests throughout.
+- **2026-08-05** — Implemented real LLM-backed generation for working diagnosis, confidence, and insights (the PTee Assistant panel content shown in the UI was previously always static fixture text):
+  - Designed the integration around the existing `services/insights.py`/`services/assessments.py` seam rather than a new subsystem: added `backend/app/services/engines/` — `base.py` (a `WorkingDiagnosisEngine` `Protocol` plus `GeneratedAssessment`/`GeneratedInsightTag` Pydantic schemas), `anthropic_client.py` (a cached `anthropic.Anthropic` client factory), and `working_diagnosis_engine.py` (`ClaudeWorkingDiagnosisEngine`, the real implementation).
+  - One combined `client.messages.parse()` structured-output call to `claude-opus-5` (per the `claude-api` skill's model mandate) generates diagnosis text, a 0–100 confidence score, and an insight summary + tags together from the assessment's patient summary, clinical summary, and logged findings — rather than three separate calls reasoning over the same data.
+  - New `POST /assessments/{id}/diagnosis/generate` endpoint (`api/v1/diagnosis.py`) triggers generation and persists the result; `assessment_sessions` gained `insight_summary`/`insight_tags` columns (migration `0003_add_insight_fields`) so a generated result survives past the single request. `services/insights.py` was rewritten to read those persisted columns, falling back to a "nothing generated yet" placeholder (replacing the old always-present "Biceps Femoris..." fixture text) until generation has run at least once for that session.
+  - `services/assessments.py::generate_diagnosis` takes an optional `engine` parameter for dependency injection, so `backend/tests/test_diagnosis_generate.py` (6 new tests) exercises the full service+endpoint logic with a fake engine — no real network calls in the test suite (36 backend tests pass total).
+  - Frontend: `lib/api.ts` gained `generateDiagnosis()`; `PteeAssistantPanel` gained a "Generate with AI" button (next to "Working diagnosis") wired to a `useMutation` that updates the assessment and invalidates the insights query on success, and an inline error message on failure.
+  - **Bug found and fixed via live manual testing** (curl against the running backend with no `ANTHROPIC_API_KEY` set): the Anthropic SDK raises a bare `TypeError` at request-build time when no key is configured, not an `anthropic.APIStatusError`/`APIConnectionError` — the endpoint's except clause didn't catch it, so the failure surfaced as an unhandled `500` instead of a clear error. Fixed with an explicit upfront key check in `get_anthropic_client()` raising `RuntimeError`, caught alongside the real Anthropic exception types in the endpoint; re-verified via curl (`502` with an actionable message) and added a regression test (`test_generate_diagnosis_endpoint_502_when_api_key_missing`).
+  - Verified: 36 pytest tests pass (real Postgres test DB, no mocked-out client at the HTTP layer — mocking happens at the service's `engine` parameter); `npm run lint`/`npm run build` clean; full headless-browser Playwright run against the live app with no `ANTHROPIC_API_KEY` configured (the actual out-of-the-box state in this environment) confirmed the "Generate with AI" button shows a loading state, the request returns `502`, the inline error message renders, the button re-enables, and the assessment's prior diagnosis/confidence are left untouched — the complete failure/degradation path, end to end. **Not verified**: the success path (an actual generated diagnosis from a real Claude API call) — no `ANTHROPIC_API_KEY` is available in this environment; the request/response contract was validated instead via the mocked-engine pytest suite plus a live schema-validation smoke check of the Anthropic call shape.
+  - README.md updated in the same turn: Project Overview, Environment files (documenting `ANTHROPIC_API_KEY`), Manual Verification Checklist (new "AI generation" section), and Troubleshooting (the 502/missing-key scenario).

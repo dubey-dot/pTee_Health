@@ -127,6 +127,11 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  generateDiagnosis: (assessmentId: string) =>
+    request<Assessment>(`/assessments/${assessmentId}/diagnosis/generate`, {
+      method: "POST",
+    }),
+
   getFindings: (assessmentId: string) =>
     request<Finding[]>(`/assessments/${assessmentId}/findings`),
 

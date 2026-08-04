@@ -4,8 +4,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.assessment_session import AssessmentSession
+from app.models.legacy_finding import Finding as FindingModel
 from app.models.patient import Patient
 from app.schemas.assessment import Assessment, AssessmentUpdate, DiagnosisUpdate
+from app.services.engines.base import WorkingDiagnosisEngine
+from app.services.engines.working_diagnosis_engine import ClaudeWorkingDiagnosisEngine
 
 
 def _to_schema(record: AssessmentSession) -> Assessment:
@@ -63,6 +66,41 @@ def update_diagnosis(db: Session, assessment_id: str, data: DiagnosisUpdate) -> 
         record.diagnosis = data.diagnosis
     if data.action is not None:
         record.diagnosis_action = data.action
+    record.version += 1
+    db.commit()
+    db.refresh(record)
+    return _to_schema(record)
+
+
+def generate_diagnosis(
+    db: Session, assessment_id: str, engine: WorkingDiagnosisEngine | None = None
+) -> Assessment | None:
+    """Runs the Claude-backed working-diagnosis engine and persists its
+    output: diagnosis, confidence, and insight_summary/insight_tags (read by
+    services/insights.py) all come from one combined LLM call. Raises
+    whatever `engine.generate()` raises (anthropic.APIError subclasses) —
+    the API layer turns that into a 502; existing diagnosis/confidence are
+    left untouched on failure rather than cleared.
+    """
+    record = db.get(AssessmentSession, assessment_id)
+    if not record:
+        return None
+
+    patient = db.get(Patient, record.patient_id)
+    findings = db.scalars(
+        select(FindingModel).where(FindingModel.assessment_id == assessment_id)
+    ).all()
+
+    result = (engine or ClaudeWorkingDiagnosisEngine()).generate(
+        patient_summary=patient.chief_complaint if patient else "",
+        clinical_summary=patient.clinical_summary if patient else "",
+        findings=[{"tag": f.tag, "label": f.label} for f in findings],
+    )
+
+    record.diagnosis = result.diagnosis
+    record.confidence = result.confidence
+    record.insight_summary = result.insight_summary
+    record.insight_tags = [tag.model_dump() for tag in result.insight_tags]
     record.version += 1
     db.commit()
     db.refresh(record)
