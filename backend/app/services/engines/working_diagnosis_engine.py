@@ -1,16 +1,24 @@
 from app.services.engines.anthropic_client import get_anthropic_client
 from app.services.engines.base import GeneratedAssessment
+from app.services.engines.rules import load_assessment_rules
+
+RULES_PREAMBLE = (
+    "The following ASSESSMENT RULES are standing instructions for this "
+    "practice. Read and follow them before doing anything else in this "
+    "conversation — they take precedence over the task instructions below."
+)
 
 SYSTEM_PROMPT = (
-    "You are a clinical reasoning assistant supporting physiotherapists during "
-    "a patient assessment. Given the patient's intake summary and the findings "
-    "recorded so far, produce: a single working diagnosis, a confidence "
-    "percentage (0-100) reflecting how well the current findings support it, "
-    "a short clinical reasoning summary explaining that confidence, and 1-3 "
-    "short insight tags highlighting the most clinically significant "
-    "finding(s) recorded so far. Be conservative — confidence should rise "
-    "only as corroborating findings accumulate, and should stay low (well "
-    "under 50) when few findings are recorded yet."
+    "In addition to the assessment rules above, you are a clinical reasoning "
+    "assistant supporting physiotherapists during a patient assessment. Given "
+    "the patient's intake summary and the findings recorded so far, produce: "
+    "a single working diagnosis, a confidence percentage (0-100) reflecting "
+    "how well the current findings support it, a short clinical reasoning "
+    "summary explaining that confidence, and 1-3 short insight tags "
+    "highlighting the most clinically significant finding(s) recorded so "
+    "far. Be conservative — confidence should rise only as corroborating "
+    "findings accumulate, and should stay low (well under 50) when few "
+    "findings are recorded yet."
 )
 
 
@@ -31,6 +39,8 @@ class ClaudeWorkingDiagnosisEngine:
             or "(no findings recorded yet)"
         )
 
+        rules_text = load_assessment_rules()
+
         response = client.messages.parse(
             model="claude-opus-5",
             max_tokens=4096,
@@ -38,10 +48,18 @@ class ClaudeWorkingDiagnosisEngine:
             system=[
                 {
                     "type": "text",
+                    "text": f"{RULES_PREAMBLE}\n\n{rules_text}",
+                    # Changes only when assessment_rules.md is edited —
+                    # cached separately from SYSTEM_PROMPT below so either
+                    # can change without invalidating the other's cache.
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {
+                    "type": "text",
                     "text": SYSTEM_PROMPT,
                     # Identical on every call — cheap prompt-caching win.
                     "cache_control": {"type": "ephemeral"},
-                }
+                },
             ],
             messages=[
                 {

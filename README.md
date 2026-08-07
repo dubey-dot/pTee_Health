@@ -50,6 +50,13 @@ Current implementation:
   other endpoint is unaffected, and the UI degrades to a visible error
   message rather than crashing. No RAG/vector DB yet — this is a single
   structured-output call over the current patient/findings, not retrieval.
+  Every call is also governed by standing rules loaded from
+  `backend/app/services/engines/assessment_rules.md` — a plain-Markdown file
+  (currently a placeholder) that's read fresh on every request and sent to
+  Claude as a dedicated system-prompt block Claude is instructed to follow
+  before anything else. Edit that file to change what Claude must follow;
+  no Python changes or backend restart needed — see
+  `services/engines/rules.py`.
 - **Doctor's Notes are real now**: the Patient Summary card's "Doctor's
   Notes" section supports both typed and voice-dictated notes, persisted
   per-assessment via `POST /assessments/{id}/notes`. Voice-to-text runs
@@ -381,6 +388,7 @@ data, since it's Postgres-backed now.
 - [ ] Without `ANTHROPIC_API_KEY` set: clicking it shows a spinner, then a visible red error message under the button; existing diagnosis/confidence/insights are **unchanged**, not cleared; the button re-enables and can be retried
 - [ ] `POST /api/v1/assessments/assessment-1/diagnosis/generate` with no key configured → `502`, body contains `"ANTHROPIC_API_KEY is not configured"` — not a `500`
 - [ ] With a real key configured: clicking it updates the diagnosis text, confidence meter, and Insights panel content together (one call generates all three); `GET /assessments/assessment-1/insights` afterward returns the newly generated `tags`, no longer `[]`
+- [ ] Renaming/deleting `backend/app/services/engines/assessment_rules.md` and calling `/diagnosis/generate` → `502`, body contains `"Assessment rules file not found"` — not a `500` (restore the file afterward)
 
 **Doctor's Notes**
 - [ ] Patient Summary card's "Doctor's Notes" header count starts at the real note count (`0` on a fresh assessment), not a hardcoded number
@@ -406,6 +414,13 @@ backend); any other message is a real upstream failure (bad key, network,
 rate limit, Anthropic outage) surfaced as-is from the `anthropic` SDK. This
 is the *only* endpoint in the app that depends on an external service —
 everything else keeps working normally regardless.
+
+**`"Assessment rules file not found"` in the `502` response**
+`backend/app/services/engines/assessment_rules.md` is missing — every
+"Generate with AI" call loads it fresh and fails loudly rather than silently
+skipping the rules (see `services/engines/rules.py`). Restore the file (git
+checkout, or recreate it — see the template comments at the top of a working
+copy) and retry; no restart needed since it's read fresh on every call.
 
 **`curl.exe -d '{"key":"value"}'` from PowerShell returns `Expecting property name enclosed in double quotes`**
 PowerShell 5.1 mangles embedded double quotes when forwarding an argument to
