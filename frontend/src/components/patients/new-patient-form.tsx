@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { api, type PatientCreateInput } from "@/lib/api";
 
 type FormState = {
@@ -33,16 +34,42 @@ const EMPTY_FORM: FormState = {
   previousInjuries: "",
 };
 
-const FIELDS: { key: keyof FormState; label: string; placeholder?: string; type?: string }[] = [
+const FIELDS: {
+  key: keyof FormState;
+  label: string;
+  placeholder?: string;
+  type?: string;
+  multiline?: boolean;
+}[] = [
   { key: "age", label: "Age", type: "number", placeholder: "e.g. 32" },
   { key: "gender", label: "Gender", placeholder: "e.g. Female" },
   { key: "occupationSport", label: "Occupation / Sport", placeholder: "e.g. Software engineer · runner" },
-  { key: "chiefComplaint", label: "Chief complaint", placeholder: "e.g. Right anterior knee pain" },
   { key: "duration", label: "Duration", placeholder: "e.g. 3 months" },
   { key: "painScore", label: "Pain score", placeholder: "e.g. 6/10" },
-  { key: "aggravating", label: "Aggravating factors", placeholder: "e.g. stairs, squatting" },
-  { key: "relieving", label: "Relieving factors", placeholder: "e.g. rest, ice" },
-  { key: "previousInjuries", label: "Previous injuries", placeholder: "e.g. none" },
+  {
+    key: "chiefComplaint",
+    label: "Chief complaint",
+    placeholder: "e.g. Right anterior knee pain, worse over the last 3 months...",
+    multiline: true,
+  },
+  {
+    key: "aggravating",
+    label: "Aggravating factors",
+    placeholder: "e.g. stairs, squatting, prolonged sitting...",
+    multiline: true,
+  },
+  {
+    key: "relieving",
+    label: "Relieving factors",
+    placeholder: "e.g. rest, ice, stretching...",
+    multiline: true,
+  },
+  {
+    key: "previousInjuries",
+    label: "Previous injuries",
+    placeholder: "e.g. ACL reconstruction (2021), recurring ankle sprains...",
+    multiline: true,
+  },
 ];
 
 export function NewPatientForm() {
@@ -53,8 +80,9 @@ export function NewPatientForm() {
 
   const canSubmit = form.name.trim().length > 0 && !isSubmitting;
 
-  const setField = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  const setField =
+    (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,21 +139,32 @@ export function NewPatientForm() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {FIELDS.map((field) => (
-          <div key={field.key}>
+          <div key={field.key} className={field.multiline ? "sm:col-span-2" : undefined}>
             <label
               htmlFor={`patient-${field.key}`}
               className="text-[11px] font-semibold tracking-wide text-slate-500"
             >
               {field.label.toUpperCase()}
             </label>
-            <Input
-              id={`patient-${field.key}`}
-              type={field.type ?? "text"}
-              value={form[field.key]}
-              onChange={setField(field.key)}
-              placeholder={field.placeholder}
-              className="mt-2 h-10 rounded-xl border-slate-200 px-3.5 text-sm placeholder:text-slate-400"
-            />
+            {field.multiline ? (
+              <Textarea
+                id={`patient-${field.key}`}
+                value={form[field.key]}
+                onChange={setField(field.key)}
+                placeholder={field.placeholder}
+                rows={3}
+                className="mt-2 min-h-28 rounded-xl border-slate-200 px-3.5 py-2.5 text-sm placeholder:text-slate-400"
+              />
+            ) : (
+              <Input
+                id={`patient-${field.key}`}
+                type={field.type ?? "text"}
+                value={form[field.key]}
+                onChange={setField(field.key)}
+                placeholder={field.placeholder}
+                className="mt-2 h-10 rounded-xl border-slate-200 px-3.5 text-sm placeholder:text-slate-400"
+              />
+            )}
           </div>
         ))}
       </div>
