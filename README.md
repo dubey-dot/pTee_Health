@@ -52,11 +52,26 @@ Current implementation:
   structured-output call over the current patient/findings, not retrieval.
   Every call is also governed by standing rules loaded from
   `backend/app/services/engines/assessment_rules.md` — a plain-Markdown file
-  (currently a placeholder) that's read fresh on every request and sent to
-  Claude as a dedicated system-prompt block Claude is instructed to follow
-  before anything else. Edit that file to change what Claude must follow;
-  no Python changes or backend restart needed — see
-  `services/engines/rules.py`.
+  that's read fresh on every request and sent to Claude as a dedicated
+  system-prompt block Claude is instructed to follow before anything else.
+  Edit that file to change what Claude must follow; no Python changes or
+  backend restart needed — see `services/engines/rules.py`.
+- **PTee Assistant now recommends what to test next**, its core purpose:
+  "Recommended tests" (`RecommendedTestsPanel`, inside the PTee Assistant
+  panel) calls `POST /assessments/{id}/recommendations` on demand
+  ("Suggest tests") and returns a ranked **batch of up to 4 tests**, each
+  with its own Test Name, Summary, expandable "Why this test" (full
+  reasoning), and independent confidence score (High/Medium/Low, color-coded).
+  The doctor reviews each one and **Accepts or Rejects** it — rejecting
+  shows a brief "Undo" affordance, accepting moves it into a **Selected
+  Tests** panel for final review before it's actually performed. Accept/Reject
+  state is client-side only (nothing persisted); "Reset review" fetches a
+  fresh batch. Governed by its own rules file,
+  `services/engines/recommendation_rules.md`, loaded alongside
+  `assessment_rules.md` on every call
+  (`app/services/engines/recommendation_engine.py`). Advisory only — it
+  never writes to the database; the doctor logs the actual performed test
+  through the existing "Log a test" flow once it's done.
 - **Doctor's Notes are real now**: the Patient Summary card's "Doctor's
   Notes" section supports both typed and voice-dictated notes, persisted
   per-assessment via `POST /assessments/{id}/notes`. Voice-to-text runs
@@ -318,6 +333,14 @@ itself when the note came from the mic button):
 curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/notes -H "Content-Type: application/json" -d "{\"content\":\"Patient reports improved ROM since last visit.\"}"
 ```
 
+**Get a batch of recommended tests for that assessment** — no request body,
+returns up to 4 ranked tests; requires `ANTHROPIC_API_KEY` like
+`/diagnosis/generate` does:
+
+```powershell
+curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/recommendations
+```
+
 **What to check on each response:**
 - Status `201`, and the JSON body echoes back what you sent plus a
   generated `id` and any FK field (`patientId`/`assessmentId`) filled in.
@@ -354,7 +377,7 @@ data, since it's Postgres-backed now.
 - [ ] `GET /api/v1/assessments/assessment-1/findings` → 200, 5 findings, first one (`pelvis-shift`) has a non-null `detail`
 - [ ] `GET /api/v1/assessments/assessment-1/insights` → 200, non-empty `summary` (`tags` is `[]` until `/diagnosis/generate` has been run at least once — expected, not a bug)
 - [ ] A GET for a nonexistent ID (e.g. `/api/v1/patients/does-not-exist`) → 404, not a 500
-- [ ] `/docs` (Swagger UI) loads and lists all routers: patients, assessments, findings, diagnosis, tests, insights, notes
+- [ ] `/docs` (Swagger UI) loads and lists all routers: patients, assessments, findings, diagnosis, tests, insights, notes, recommendations
 
 **Frontend routing**
 - [ ] `/` loads, hero headline rotates between two variants every ~4s
@@ -396,6 +419,17 @@ data, since it's Postgres-backed now.
 - [ ] Clicking the mic button in a browser that supports the Web Speech API (Chrome/Edge desktop, with mic permission granted) starts listening (button turns solid/shows a stop icon), transcribes speech into the same textarea, and stops on click again or on its own after a pause
 - [ ] Clicking the mic button in a browser/environment where the Web Speech API is unavailable (e.g. headless automation, Firefox, Safari) shows the inline "Voice input isn't supported in this browser" message instead of throwing — verified via headless-browser Playwright testing, since real microphone dictation can't be exercised outside a real browser session with mic access
 - [ ] A note saved via the mic shows a "· dictated" tag next to its timestamp in the list; a typed note doesn't
+
+**Recommended tests**
+- [ ] The "Recommended tests" section renders inside the PTee Assistant card itself — between the diagnosis block and the findings checklist — not as a separate card above/outside it
+- [ ] Clicking "Suggest tests" shows a spinner, then up to 4 ranked test cards, each with a confidence bar/percentage/label (green ≥70% High, amber ≥45% Medium, red <45% Low) and a "X of Y tests awaiting your review" counter
+- [ ] Clicking "Why this test" expands the fuller reasoning inline; clicking again collapses it
+- [ ] Clicking Accept moves that card into the "Selected tests" panel below (with its confidence %) and out of the pending list; the counter updates
+- [ ] Clicking Reject removes the card and shows a "Test rejected. Undo" banner; clicking Undo restores it to the pending list
+- [ ] Clicking "Reset review" fetches a brand-new batch, discarding all current Accept/Reject decisions
+- [ ] Reloading the page clears all Accept/Reject/Selected-tests state — confirms it's client-side only, not persisted (by design, per the confirmed "staging only" behavior)
+- [ ] `POST /api/v1/assessments/assessment-1/recommendations` with no key configured → `502`, same failure convention as `/diagnosis/generate`
+- [ ] Does not change the assessment's `version` or anything else in `GET /assessments/{id}` — purely advisory, confirmed by comparing the response before/after calling it
 - [ ] Diagnosis Agree/Update/Fully-change buttons and the generate button don't interfere with each other — both write to the same `Assessment`, and the UI reflects whichever ran last
 
 **Error handling**
@@ -415,12 +449,12 @@ rate limit, Anthropic outage) surfaced as-is from the `anthropic` SDK. This
 is the *only* endpoint in the app that depends on an external service —
 everything else keeps working normally regardless.
 
-**`"Assessment rules file not found"` in the `502` response**
-`backend/app/services/engines/assessment_rules.md` is missing — every
-"Generate with AI" call loads it fresh and fails loudly rather than silently
-skipping the rules (see `services/engines/rules.py`). Restore the file (git
-checkout, or recreate it — see the template comments at the top of a working
-copy) and retry; no restart needed since it's read fresh on every call.
+**`"Assessment rules file not found"` / `"Recommendation rules file not found"` in a `502` response**
+`backend/app/services/engines/assessment_rules.md` or `recommendation_rules.md`
+is missing — every "Generate with AI" and "Suggest next test" call loads
+both fresh and fails loudly rather than silently skipping the rules (see
+`services/engines/rules.py`). Restore the file (git checkout, or recreate
+it) and retry; no restart needed since both are read fresh on every call.
 
 **`curl.exe -d '{"key":"value"}'` from PowerShell returns `Expecting property name enclosed in double quotes`**
 PowerShell 5.1 mangles embedded double quotes when forwarding an argument to

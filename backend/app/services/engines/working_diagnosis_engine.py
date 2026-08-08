@@ -1,12 +1,6 @@
 from app.services.engines.anthropic_client import get_anthropic_client
 from app.services.engines.base import GeneratedAssessment
-from app.services.engines.rules import load_assessment_rules
-
-RULES_PREAMBLE = (
-    "The following ASSESSMENT RULES are standing instructions for this "
-    "practice. Read and follow them before doing anything else in this "
-    "conversation — they take precedence over the task instructions below."
-)
+from app.services.engines.rules import ASSESSMENT_RULES_PREAMBLE, load_assessment_rules
 
 SYSTEM_PROMPT = (
     "In addition to the assessment rules above, you are a clinical reasoning "
@@ -48,7 +42,7 @@ class ClaudeWorkingDiagnosisEngine:
             system=[
                 {
                     "type": "text",
-                    "text": f"{RULES_PREAMBLE}\n\n{rules_text}",
+                    "text": f"{ASSESSMENT_RULES_PREAMBLE}\n\n{rules_text}",
                     # Changes only when assessment_rules.md is edited —
                     # cached separately from SYSTEM_PROMPT below so either
                     # can change without invalidating the other's cache.

@@ -15,6 +15,7 @@ import {
 import { useState } from "react";
 
 import { FindingsList } from "@/components/assessment/findings-list";
+import { RecommendedTestsPanel } from "@/components/assessment/recommended-tests-panel";
 import {
   api,
   type Assessment,
@@ -198,6 +199,8 @@ export function PteeAssistantPanel({
             </button>
           </div>
         ))}
+
+      <RecommendedTestsPanel assessmentId={assessmentId} />
 
       <div className="mt-4">
         <FindingsList

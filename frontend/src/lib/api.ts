@@ -82,6 +82,18 @@ export interface DoctorNote {
   createdAt: string;
 }
 
+export interface RecommendedTest {
+  testName: string;
+  summary: string;
+  whyRecommended: string;
+  confidence: number;
+}
+
+export interface TestRecommendationBatch {
+  tests: RecommendedTest[];
+  noRecommendationReason: string | null;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -167,5 +179,10 @@ export const api = {
     request<DoctorNote>(`/assessments/${assessmentId}/notes`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  getTestRecommendations: (assessmentId: string) =>
+    request<TestRecommendationBatch>(`/assessments/${assessmentId}/recommendations`, {
+      method: "POST",
     }),
 };

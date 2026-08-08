@@ -11,14 +11,13 @@
 > (`services/engines/rules.py`), so edits take effect on the very next
 > "Generate with AI" call, no backend restart needed.
 >
-> For the *next-recommended-assessment* spec (one assessment at a time,
-> Test Type / Test Name / Expected / Actual format), see
-> [`recommendation_rules.md`](recommendation_rules.md) in this same folder.
-> That spec is **not yet wired into any engine** — there is no
-> `RecommendationEngine` in `base.py` yet, only `WorkingDiagnosisEngine`.
-> It's kept in its own file, ready for when that engine is built, so it
-> doesn't get lost and doesn't clutter the rules Claude actually receives
-> today.
+> For the *recommended-assessment-batch* spec (up to 4 ranked tests per
+> call, each independently confidence-scored, Test Name / Summary / Why
+> Recommended / Confidence format), see
+> [`recommendation_rules.md`](recommendation_rules.md) in this same folder
+> — sent to Claude by `recommendation_engine.py` (`ClaudeRecommendationEngine`)
+> on every `POST /assessments/{id}/recommendations` call, shown as a
+> review feed (Accept/Reject) inside the PTee Assistant panel.
 
 ## 1. Role & Scope
 

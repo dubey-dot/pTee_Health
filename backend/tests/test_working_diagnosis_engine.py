@@ -48,7 +48,7 @@ def test_generate_includes_assessment_rules_in_system_prompt(monkeypatch):
 
     rules_block, task_block = system_blocks
     assert "Assessment Rules" in rules_block["text"]
-    assert engine_module.RULES_PREAMBLE in rules_block["text"]
+    assert engine_module.ASSESSMENT_RULES_PREAMBLE in rules_block["text"]
     assert rules_block["cache_control"] == {"type": "ephemeral"}
     assert task_block["text"] == engine_module.SYSTEM_PROMPT
     assert task_block["cache_control"] == {"type": "ephemeral"}
