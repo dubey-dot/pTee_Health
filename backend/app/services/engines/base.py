@@ -1,6 +1,11 @@
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
+
+# Matches app.schemas.test.TestType exactly — a recommended test must map
+# onto the same taxonomy as a manually-logged one, since accepting a
+# recommendation creates a real LoggedTest via the same endpoint.
+RecommendedTestType = Literal["joint", "muscle", "gait"]
 
 
 class GeneratedInsightTag(BaseModel):
@@ -40,9 +45,15 @@ class WorkingDiagnosisEngine(Protocol):
 
 class RecommendedTest(BaseModel):
     """One recommended assessment within a batch, in the shape required by
-    recommendation_rules.md Rule 3."""
+    recommendation_rules.md Rule 3. Deliberately carries no confidence
+    score of its own — only the overall working-diagnosis confidence
+    (GeneratedAssessment.confidence) is shown anywhere in the UI, to avoid
+    two different "confidence" numbers competing for the doctor's
+    attention.
+    """
 
     test_name: str
+    test_type: RecommendedTestType
     # Short, always-visible line — the clinical pattern/signal driving the
     # recommendation (e.g. "Upper trapezius dominance, suspected
     # cervicogenic headache"). Not the full reasoning — see why_recommended.
@@ -51,17 +62,14 @@ class RecommendedTest(BaseModel):
     # what the test is/does, why it's recommended, and which specific
     # intake/finding/note signals triggered it.
     why_recommended: str
-    # How confident the engine is that *this specific test* is worth
-    # doing — independent of the overall working-diagnosis confidence.
-    confidence: int = Field(ge=0, le=100)
 
 
 class TestRecommendationBatch(BaseModel):
     """Root structured-output shape for the recommendation engine — a
     ranked batch (Rule 1), not a single test. `tests` is empty when no
-    further tests are worth recommending (confidence is already
-    sufficient, or the remaining gap can't be closed by more testing);
-    `no_recommendation_reason` explains why in that case.
+    further tests are worth recommending (the overall diagnosis confidence
+    is already sufficient, or the remaining gap can't be closed by more
+    testing); `no_recommendation_reason` explains why in that case.
     """
 
     tests: list[RecommendedTest] = []

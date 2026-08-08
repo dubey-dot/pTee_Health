@@ -13,9 +13,17 @@ export interface FindingsListProps {
   assessmentId: string;
   initialFindings: Finding[];
   initialInsights: Insights;
+  /** Called after a test is logged so the parent can re-trigger diagnosis
+   * generation with the new data. */
+  onTestLogged?: () => void;
 }
 
-export function FindingsList({ assessmentId, initialFindings, initialInsights }: FindingsListProps) {
+export function FindingsList({
+  assessmentId,
+  initialFindings,
+  initialInsights,
+  onTestLogged,
+}: FindingsListProps) {
   const queryClient = useQueryClient();
   const [showLogTest, setShowLogTest] = useState(false);
   const findingsKey = ["findings", assessmentId];
@@ -63,7 +71,9 @@ export function FindingsList({ assessmentId, initialFindings, initialInsights }:
       api.createTest(assessmentId, test),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["insights", assessmentId] });
+      queryClient.invalidateQueries({ queryKey: ["tests", assessmentId] });
       setShowLogTest(false);
+      onTestLogged?.();
     },
   });
 

@@ -38,9 +38,9 @@ def _fake_result(**overrides) -> TestRecommendationBatch:
         tests=[
             RecommendedTest(
                 test_name="Hip Internal Rotation",
+                test_type="joint",
                 summary="Anterior pelvic tilt with suspected hip restriction",
                 why_recommended="Checks whether hip restriction is contributing.",
-                confidence=82,
             )
         ],
         no_recommendation_reason=None,
@@ -56,7 +56,7 @@ def test_get_recommendations_service(db_session):
     assert result is not None
     assert len(result.tests) == 1
     assert result.tests[0].test_name == "Hip Internal Rotation"
-    assert result.tests[0].confidence == 82
+    assert result.tests[0].test_type == "joint"
 
     assert len(engine.calls) == 1
     assert engine.calls[0]["patient_summary"] == "Right anterior knee pain"

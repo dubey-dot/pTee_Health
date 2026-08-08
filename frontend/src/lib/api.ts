@@ -84,9 +84,9 @@ export interface DoctorNote {
 
 export interface RecommendedTest {
   testName: string;
+  testType: TestType;
   summary: string;
   whyRecommended: string;
-  confidence: number;
 }
 
 export interface TestRecommendationBatch {
@@ -165,10 +165,18 @@ export const api = {
 
   deleteFinding: (findingId: string) => request<void>(`/findings/${findingId}`, { method: "DELETE" }),
 
+  getTests: (assessmentId: string) => request<LoggedTest[]>(`/assessments/${assessmentId}/tests`),
+
   createTest: (assessmentId: string, data: { type: TestType; name: string; result: string }) =>
     request<LoggedTest>(`/assessments/${assessmentId}/tests`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  updateTest: (testId: string, result: string) =>
+    request<LoggedTest>(`/tests/${testId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ result }),
     }),
 
   getInsights: (assessmentId: string) => request<Insights>(`/assessments/${assessmentId}/insights`),

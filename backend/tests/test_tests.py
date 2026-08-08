@@ -24,3 +24,25 @@ def test_create_test_assessment_not_found(client):
         json={"type": "joint", "name": "x", "result": ""},
     )
     assert res.status_code == 404
+
+
+def test_update_test_result(client):
+    created = client.post(
+        "/api/v1/assessments/assessment-1/tests",
+        json={"type": "joint", "name": "Single leg bridge", "result": "Weak on right"},
+    ).json()
+
+    before_version = client.get("/api/v1/assessments/assessment-1").json()["version"]
+    res = client.patch(f"/api/v1/tests/{created['id']}", json={"result": "Redone — now symmetric"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["result"] == "Redone — now symmetric"
+    assert body["name"] == "Single leg bridge"  # name/type unchanged, only result edited
+
+    after_version = client.get("/api/v1/assessments/assessment-1").json()["version"]
+    assert after_version == before_version + 1
+
+
+def test_update_test_not_found(client):
+    res = client.patch("/api/v1/tests/does-not-exist", json={"result": "x"})
+    assert res.status_code == 404

@@ -1,11 +1,12 @@
 from app.schemas.base import CamelModel
+from app.schemas.test import TestType
 
 
 class RecommendedTest(CamelModel):
     test_name: str
+    test_type: TestType
     summary: str
     why_recommended: str
-    confidence: int
 
 
 class TestRecommendationBatch(CamelModel):

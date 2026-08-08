@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.assessment_session import AssessmentSession
 from app.models.legacy_test import LoggedTest as LoggedTestModel
-from app.schemas.test import LoggedTest, LoggedTestCreate
+from app.schemas.test import LoggedTest, LoggedTestCreate, LoggedTestUpdate
 
 
 def _to_schema(record: LoggedTestModel) -> LoggedTest:
@@ -39,6 +39,19 @@ def create_test(db: Session, assessment_id: str, data: LoggedTestCreate) -> Logg
     )
     db.add(record)
     assessment.version += 1
+    db.commit()
+    db.refresh(record)
+    return _to_schema(record)
+
+
+def update_test(db: Session, test_id: str, data: LoggedTestUpdate) -> LoggedTest | None:
+    record = db.get(LoggedTestModel, test_id)
+    if not record:
+        return None
+    record.result = data.result
+    assessment = db.get(AssessmentSession, record.assessment_id)
+    if assessment:
+        assessment.version += 1
     db.commit()
     db.refresh(record)
     return _to_schema(record)

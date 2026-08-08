@@ -1,46 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mic, Square } from "lucide-react";
 
 import { api, type DoctorNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-// Minimal typing for the (non-standard, vendor-prefixed) Web Speech API —
-// not part of TypeScript's DOM lib, so it's declared locally rather than
-// pulling in a dependency for a handful of fields.
-interface SpeechRecognitionResultLike {
-  0: { transcript: string };
-  isFinal: boolean;
-}
-
-interface SpeechRecognitionEventLike extends Event {
-  resultIndex: number;
-  results: ArrayLike<SpeechRecognitionResultLike>;
-}
-
-interface SpeechRecognitionLike extends EventTarget {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+import { useVoiceDictation } from "@/lib/use-voice-dictation";
 
 function formatTime(iso: string) {
   const date = new Date(iso);
@@ -73,15 +39,11 @@ export function DoctorNotesSection({ assessmentId, initialNotes }: DoctorNotesSe
 
   const [content, setContent] = useState("");
   const [source, setSource] = useState<"typed" | "voice">("typed");
-  const [isListening, setIsListening] = useState(false);
-  const [voiceError, setVoiceError] = useState(false);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.stop();
-    };
-  }, []);
+  const { isListening, voiceError, toggleListening } = useVoiceDictation((transcript) => {
+    setSource("voice");
+    setContent((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
+  });
 
   const createMutation = useMutation({
     mutationFn: (data: { content: string; source: "typed" | "voice" }) =>
@@ -98,41 +60,6 @@ export function DoctorNotesSection({ assessmentId, initialNotes }: DoctorNotesSe
   const handleSave = () => {
     if (!canSave) return;
     createMutation.mutate({ content: content.trim(), source });
-  };
-
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      return;
-    }
-
-    const Recognition = getSpeechRecognitionConstructor();
-    if (!Recognition) {
-      setVoiceError(true);
-      return;
-    }
-    setVoiceError(false);
-
-    const recognition = new Recognition();
-    recognition.lang = "en-US";
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.onresult = (event) => {
-      let transcript = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (result.isFinal) transcript += result[0].transcript;
-      }
-      if (!transcript.trim()) return;
-      setSource("voice");
-      setContent((prev) => (prev ? `${prev.trim()} ${transcript.trim()}` : transcript.trim()));
-    };
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
   };
 
   return (

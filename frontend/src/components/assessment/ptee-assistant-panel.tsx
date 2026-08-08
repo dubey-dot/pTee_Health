@@ -12,7 +12,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { FindingsList } from "@/components/assessment/findings-list";
 import { RecommendedTestsPanel } from "@/components/assessment/recommended-tests-panel";
@@ -75,6 +75,19 @@ export function PteeAssistantPanel({
     },
   });
 
+  // PTee Assistant starts automatically — no manual "Generate with AI"
+  // button. Runs once on mount, and again whenever a test is completed
+  // (see onTestCompleted/onTestLogged below) so the cumulative confidence
+  // stays current as findings come in. The ref guards against firing
+  // twice from React StrictMode's double-invoke in development.
+  const hasAutoStarted = useRef(false);
+  useEffect(() => {
+    if (hasAutoStarted.current) return;
+    hasAutoStarted.current = true;
+    generateMutation.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assessmentId]);
+
   const { status, diagnosis, confidence, diagnosisAction } = assessment;
   const confidenceLabel = confidence >= 60 ? "Good" : confidence >= 40 ? "Fair" : "Low";
 
@@ -86,19 +99,26 @@ export function PteeAssistantPanel({
             <Sparkles className="h-4 w-4 text-sky-600" />
             PTee Assistant
           </span>
-          <span className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-slate-500">
-            CONFIDENCE
-            <span className="h-1 w-10 overflow-hidden rounded-full bg-slate-200">
-              <span
-                className="block h-full rounded-full bg-sky-600"
-                style={{ width: `${confidence}%` }}
-              />
+          {generateMutation.isPending ? (
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-slate-500">
+              <Loader2 className="h-3 w-3 animate-spin text-sky-600" />
+              Analyzing…
             </span>
-            <span className="font-normal text-slate-400">{confidence}%</span>
-            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-              {confidenceLabel}
+          ) : (
+            <span className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-slate-500">
+              CONFIDENCE
+              <span className="h-1 w-10 overflow-hidden rounded-full bg-slate-200">
+                <span
+                  className="block h-full rounded-full bg-sky-600"
+                  style={{ width: `${confidence}%` }}
+                />
+              </span>
+              <span className="font-normal text-slate-400">{confidence}%</span>
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                {confidenceLabel}
+              </span>
             </span>
-          </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -117,20 +137,6 @@ export function PteeAssistantPanel({
           >
             <Lightbulb className="h-3.5 w-3.5" />
             Working diagnosis
-          </button>
-          <button
-            type="button"
-            onClick={() => generateMutation.mutate()}
-            disabled={generateMutation.isPending}
-            title="Generate working diagnosis, confidence, and insights with AI"
-            className="flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3.5 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {generateMutation.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            {generateMutation.isPending ? "Generating…" : "Generate with AI"}
           </button>
           {status === "reviewing" ? (
             <button
@@ -152,8 +158,15 @@ export function PteeAssistantPanel({
 
       {generateMutation.isError && (
         <p className="mt-3 text-sm text-red-600">
-          Couldn&apos;t generate a diagnosis. Check the backend has a valid ANTHROPIC_API_KEY
-          configured and try again.
+          Couldn&apos;t analyze this assessment. Check the backend has a valid ANTHROPIC_API_KEY
+          configured.{" "}
+          <button
+            type="button"
+            onClick={() => generateMutation.mutate()}
+            className="font-medium underline hover:no-underline"
+          >
+            Retry
+          </button>
         </p>
       )}
 
@@ -200,13 +213,17 @@ export function PteeAssistantPanel({
           </div>
         ))}
 
-      <RecommendedTestsPanel assessmentId={assessmentId} />
+      <RecommendedTestsPanel
+        assessmentId={assessmentId}
+        onTestCompleted={() => generateMutation.mutate()}
+      />
 
       <div className="mt-4">
         <FindingsList
           assessmentId={assessmentId}
           initialFindings={initialFindings}
           initialInsights={initialInsights}
+          onTestLogged={() => generateMutation.mutate()}
         />
       </div>
     </div>

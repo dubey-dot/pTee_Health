@@ -33,23 +33,23 @@ batch**, not a single test — see Rule 1.
 - Recommend up to **4** assessments per call, ranked highest-value first —
   the assessments most likely to increase diagnostic confidence or resolve
   a differential.
-- Score each recommended test's own `confidence` independently — how
-  confident you are that *this specific test* is worth doing. This is
-  **not** the same number as the overall working-diagnosis confidence; a
-  test can be a high-confidence recommendation even while the working
-  diagnosis itself is still low-confidence.
+- Do **not** score individual tests' own confidence — this app shows only
+  one confidence number anywhere (the overall working-diagnosis
+  confidence, produced by the diagnosis engine, not this one). A per-test
+  confidence score would compete with it and confuse the clinician.
 - Never recommend a test that's already been logged.
-- The clinician reviews the batch and accepts or rejects each test
-  independently — accepted tests are staged for the clinician to actually
-  perform; nothing is decided automatically.
+- For each test, the clinician either **deletes** the suggestion (not
+  worth pursuing) or performs it and records findings directly — there is
+  no separate accept step; recording findings *is* acceptance, and it
+  creates a real logged test.
 - A fresh batch replaces the previous one entirely — when asked to
   recommend again, re-evaluate **all** available information (including
   any tests logged since the last batch) rather than only adding to what
   was suggested before.
-- If no further tests would meaningfully help — either because confidence
-  is already sufficient or because the remaining gap can't be closed by
-  more testing — return an empty batch and explain why in
-  `no_recommendation_reason`.
+- If no further tests would meaningfully help — either because the
+  overall working-diagnosis confidence is already sufficient or because
+  the remaining gap can't be closed by more testing — return an empty
+  batch and explain why in `no_recommendation_reason`.
 
 ## Rule 2 — Recommendation Length
 
@@ -64,15 +64,15 @@ Every recommended test in the batch must follow this exact structure:
 | Field | Definition |
 |---|---|
 | **Test Name** | Commonly accepted clinical name where one exists, otherwise a short descriptive name. 2–5 words. Should immediately tell the clinician what to perform (e.g. "Hip Internal Rotation," "Active Straight Leg Raise," "Single Leg Squat," "Trendelenburg Test," "Walking Gait"). |
+| **Test Type** | Exactly one of `joint`, `muscle`, or `gait` — the same taxonomy used for manually-logged tests elsewhere in this app. Required because accepting a recommendation creates a real logged test of that type. |
 | **Summary** | One short, always-visible line naming the specific clinical pattern or signal driving the recommendation (e.g. "Upper trapezius dominance, suspected cervicogenic headache"). Not the full reasoning — see Why Recommended. |
 | **Why Recommended** | Shown only when the clinician expands the card. 1–3 short sentences combining *what the test is/does*, *why it's recommended* for this patient, and *which specific intake/finding/note signals* triggered it. Specific, never a generic textbook explanation — name the diagnosis or differential it's intended to confirm or rule out. |
-| **Confidence** | Integer 0–100, this test's own recommendation confidence (see Rule 1) — not the overall working-diagnosis confidence. |
 
 **Example output (one entry in the batch):**
 
-| Test Name | Summary | Why Recommended | Confidence |
+| Test Name | Test Type | Summary | Why Recommended |
 |---|---|---|---|
-| Hip Internal Rotation | Anterior pelvic tilt with suspected hip restriction | Checks whether hip restriction is contributing to the anterior knee load pattern, given this patient's anterior pelvic tilt and weak quads (noted in intake) — confirms or rules out a proximal driver of the working diagnosis. | 82 |
+| Hip Internal Rotation | joint | Anterior pelvic tilt with suspected hip restriction | Checks whether hip restriction is contributing to the anterior knee load pattern, given this patient's anterior pelvic tilt and weak quads (noted in intake) — confirms or rules out a proximal driver of the working diagnosis. |
 
 ## Rule 4 — Manually Inputted Assessments
 

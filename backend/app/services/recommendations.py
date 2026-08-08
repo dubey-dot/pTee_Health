@@ -16,9 +16,9 @@ def _to_schema(result) -> TestRecommendationBatch:
         tests=[
             RecommendedTest(
                 test_name=test.test_name,
+                test_type=test.test_type,
                 summary=test.summary,
                 why_recommended=test.why_recommended,
-                confidence=test.confidence,
             )
             for test in result.tests
         ],
@@ -30,11 +30,12 @@ def get_recommendations(
     db: Session, assessment_id: str, engine: RecommendationEngine | None = None
 ) -> TestRecommendationBatch | None:
     """Advisory only — reads current state and asks the engine for a
-    ranked batch of tests to consider, but writes nothing to the database.
-    Accept/Reject decisions are client-side only (see RecommendedTestsPanel);
-    the doctor logs the actual performed test through the existing
-    findings/tests endpoints once it's done. Regenerated fresh on every
-    call from whatever findings/tests/notes exist at that moment.
+    ranked batch of tests to consider, but writes nothing to the database
+    itself. Deleting a suggestion is client-side only (see
+    RecommendedTestsPanel); completing one calls the existing
+    POST /assessments/{id}/tests to persist the doctor's findings for
+    real. Regenerated fresh on every call from whatever findings/tests/
+    notes exist at that moment.
     """
     record = db.get(AssessmentSession, assessment_id)
     if record is None:

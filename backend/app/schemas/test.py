@@ -17,3 +17,7 @@ class LoggedTestCreate(CamelModel):
     type: TestType
     name: str
     result: str = ""
+
+
+class LoggedTestUpdate(CamelModel):
+    result: str

@@ -40,38 +40,43 @@ Current implementation:
   restart. Seeded with one demo patient (`patient-1`, Ankita Sharma) and one
   demo assessment (`assessment-1`) via an Alembic data migration. See the
   Backend APIs table in `Progress.md` for the full endpoint list.
-- **Real AI generation exists now**, gated behind `ANTHROPIC_API_KEY`. The
-  "Generate with AI" button on the Assessment screen calls
-  `POST /assessments/{id}/diagnosis/generate`, which runs one Claude Opus 5
-  call (structured outputs, `app/services/engines/working_diagnosis_engine.py`)
-  to produce the working diagnosis, confidence %, and insights summary/tags
-  together, and persists all of it. Without a configured key, that one
-  endpoint returns `502` with a clear message (see Troubleshooting) — every
-  other endpoint is unaffected, and the UI degrades to a visible error
-  message rather than crashing. No RAG/vector DB yet — this is a single
-  structured-output call over the current patient/findings, not retrieval.
-  Every call is also governed by standing rules loaded from
-  `backend/app/services/engines/assessment_rules.md` — a plain-Markdown file
-  that's read fresh on every request and sent to Claude as a dedicated
-  system-prompt block Claude is instructed to follow before anything else.
-  Edit that file to change what Claude must follow; no Python changes or
-  backend restart needed — see `services/engines/rules.py`.
+- **Real AI generation exists now**, gated behind `ANTHROPIC_API_KEY`. **PTee
+  Assistant starts automatically** — there's no manual "Generate with AI"
+  button. It calls `POST /assessments/{id}/diagnosis/generate` once when the
+  Assessment screen loads, and again every time a test is completed (see
+  below), so the confidence meter stays current as findings come in. This
+  one Claude Opus 5 call (structured outputs,
+  `app/services/engines/working_diagnosis_engine.py`) produces the working
+  diagnosis, confidence %, and insights summary/tags together, and persists
+  all of it. Without a configured key, that endpoint returns `502` with a
+  clear message shown inline (with a "Retry" link) rather than a manual
+  button — see Troubleshooting; every other endpoint is unaffected. No
+  RAG/vector DB yet — this is a single structured-output call over the
+  current patient/findings, not retrieval. Every call is also governed by
+  standing rules loaded from `backend/app/services/engines/assessment_rules.md`
+  — a plain-Markdown file that's read fresh on every request and sent to
+  Claude as a dedicated system-prompt block Claude is instructed to follow
+  before anything else. Edit that file to change what Claude must follow;
+  no Python changes or backend restart needed — see `services/engines/rules.py`.
 - **PTee Assistant now recommends what to test next**, its core purpose:
   "Recommended tests" (`RecommendedTestsPanel`, inside the PTee Assistant
   panel) calls `POST /assessments/{id}/recommendations` on demand
   ("Suggest tests") and returns a ranked **batch of up to 4 tests**, each
-  with its own Test Name, Summary, expandable "Why this test" (full
-  reasoning), and independent confidence score (High/Medium/Low, color-coded).
-  The doctor reviews each one and **Accepts or Rejects** it — rejecting
-  shows a brief "Undo" affordance, accepting moves it into a **Selected
-  Tests** panel for final review before it's actually performed. Accept/Reject
-  state is client-side only (nothing persisted); "Reset review" fetches a
-  fresh batch. Governed by its own rules file,
-  `services/engines/recommendation_rules.md`, loaded alongside
-  `assessment_rules.md` on every call
-  (`app/services/engines/recommendation_engine.py`). Advisory only — it
-  never writes to the database; the doctor logs the actual performed test
-  through the existing "Log a test" flow once it's done.
+  with a Test Name, short Summary, and expandable "Why this test" — no
+  per-test confidence score anywhere; only the overall assessment
+  confidence above is shown, to avoid two competing numbers. For each
+  test, the doctor either **deletes** the suggestion or writes/dictates
+  findings directly under it (a text field + mic button, same
+  Web-Speech-API pattern as Doctor's Notes) and clicks **"Mark
+  complete"** — this creates a **real logged test**
+  (`POST /assessments/{id}/tests`), no separate accept step. Completed
+  tests appear in a **"Completed tests"** panel with a result summary and
+  an **Edit** action (`PATCH /tests/{id}`) for redoing findings later.
+  "Completed tests" reflects the same backend data as the older, separate
+  "Log a test" panel — a test logged either way shows up in both places.
+  Governed by its own rules file, `services/engines/recommendation_rules.md`,
+  loaded alongside `assessment_rules.md` on every call
+  (`app/services/engines/recommendation_engine.py`).
 - **Doctor's Notes are real now**: the Patient Summary card's "Doctor's
   Notes" section supports both typed and voice-dictated notes, persisted
   per-assessment via `POST /assessments/{id}/notes`. Voice-to-text runs
@@ -325,6 +330,12 @@ curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac69
 curl.exe --% -X POST http://localhost:8000/api/v1/assessments/assessment-837ac696/tests -H "Content-Type: application/json" -d "{\"type\":\"joint\",\"name\":\"Single leg bridge\",\"result\":\"Weak on right\"}"
 ```
 
+**Edit a logged test's result** — copy the `"id"` from the response above (e.g. `test-a1b2c3d4`); only `result` can be changed, not the type/name:
+
+```powershell
+curl.exe --% -X PATCH http://localhost:8000/api/v1/tests/test-a1b2c3d4 -H "Content-Type: application/json" -d "{\"result\":\"Redone — now symmetric\"}"
+```
+
 **Add a doctor's note against that assessment** — `source` is optional
 (`"typed"` or `"voice"`, defaults to `"typed"`; the frontend sets `"voice"`
 itself when the note came from the mic button):
@@ -407,10 +418,12 @@ data, since it's Postgres-backed now.
 - [ ] Restarting the backend (`Ctrl+C` + re-run `uvicorn`) **keeps** all prior edits — data now persists in Postgres, this is the opposite of the old fixture-store behavior and confirms the DB is actually being used
 - [ ] `docker compose down -v` + `docker compose up -d` + `alembic upgrade head` restores the clean seeded baseline (Ankita Sharma, 5 findings)
 
-**AI generation ("Generate with AI" button)**
-- [ ] Without `ANTHROPIC_API_KEY` set: clicking it shows a spinner, then a visible red error message under the button; existing diagnosis/confidence/insights are **unchanged**, not cleared; the button re-enables and can be retried
+**AI generation (automatic — no "Generate with AI" button)**
+- [ ] Loading `/assessment/{id}` fires `POST /diagnosis/generate` automatically (check the Network tab) — the CONFIDENCE meter briefly shows "Analyzing…" with a spinner instead of the percentage while it's in flight
+- [ ] Without `ANTHROPIC_API_KEY` set: a visible red error message appears with an inline **"Retry"** link (not a full button); existing diagnosis/confidence/insights are **unchanged**, not cleared; clicking Retry re-attempts
 - [ ] `POST /api/v1/assessments/assessment-1/diagnosis/generate` with no key configured → `502`, body contains `"ANTHROPIC_API_KEY is not configured"` — not a `500`
-- [ ] With a real key configured: clicking it updates the diagnosis text, confidence meter, and Insights panel content together (one call generates all three); `GET /assessments/assessment-1/insights` afterward returns the newly generated `tags`, no longer `[]`
+- [ ] With a real key configured: the auto-triggered call updates the diagnosis text, confidence meter, and Insights panel content together (one call generates all three); `GET /assessments/assessment-1/insights` afterward returns the newly generated `tags`, no longer `[]`
+- [ ] Completing a recommended test, or logging a test via the separate "Log a test" panel, **re-triggers** `POST /diagnosis/generate` automatically — confirm a second request fires and the confidence meter updates again without any manual action
 - [ ] Renaming/deleting `backend/app/services/engines/assessment_rules.md` and calling `/diagnosis/generate` → `502`, body contains `"Assessment rules file not found"` — not a `500` (restore the file afterward)
 
 **Doctor's Notes**
@@ -422,14 +435,17 @@ data, since it's Postgres-backed now.
 
 **Recommended tests**
 - [ ] The "Recommended tests" section renders inside the PTee Assistant card itself — between the diagnosis block and the findings checklist — not as a separate card above/outside it
-- [ ] Clicking "Suggest tests" shows a spinner, then up to 4 ranked test cards, each with a confidence bar/percentage/label (green ≥70% High, amber ≥45% Medium, red <45% Low) and a "X of Y tests awaiting your review" counter
+- [ ] Clicking "Suggest tests" shows a spinner, then up to 4 ranked test cards — Test Name, short Summary, "Why this test" toggle — with **no confidence score anywhere on the cards**; only the top-of-panel CONFIDENCE meter shows a number
 - [ ] Clicking "Why this test" expands the fuller reasoning inline; clicking again collapses it
-- [ ] Clicking Accept moves that card into the "Selected tests" panel below (with its confidence %) and out of the pending list; the counter updates
-- [ ] Clicking Reject removes the card and shows a "Test rejected. Undo" banner; clicking Undo restores it to the pending list
-- [ ] Clicking "Reset review" fetches a brand-new batch, discarding all current Accept/Reject decisions
-- [ ] Reloading the page clears all Accept/Reject/Selected-tests state — confirms it's client-side only, not persisted (by design, per the confirmed "staging only" behavior)
+- [ ] Each pending card has a **Delete** (trash icon) button and a **FINDINGS** text field + mic button; typing/dictating text and clicking "Mark complete" removes the card from the pending list and adds it to "Completed tests" below — confirmed via `GET /assessments/assessment-1/tests` showing a new row with the typed result
+- [ ] Marking a test complete also **re-triggers automatic diagnosis generation** (see AI generation checks above)
+- [ ] Clicking Delete on a pending card just removes it locally — no backend call, confirmed via the Network tab
+- [ ] Clicking "Reset review" fetches a brand-new batch, discarding all current pending cards (completed tests are unaffected — they're real backend data, not part of the batch)
+- [ ] "Completed tests" shows the real result text for each test, plus an **Edit** link that reveals an inline textarea; saving calls `PATCH /tests/{id}` and the new text persists after a page reload
+- [ ] A test logged via the separate "Log a test" panel (not from a recommendation) also appears in "Completed tests" — both flows write to the same underlying test data
 - [ ] `POST /api/v1/assessments/assessment-1/recommendations` with no key configured → `502`, same failure convention as `/diagnosis/generate`
-- [ ] Does not change the assessment's `version` or anything else in `GET /assessments/{id}` — purely advisory, confirmed by comparing the response before/after calling it
+- [ ] `PATCH /api/v1/tests/{id}` with a nonexistent id → `404`, not `500`
+- [ ] Fetching a batch does not change the assessment's `version` or anything else in `GET /assessments/{id}` — purely advisory; completing/editing a test *does* bump the version (same as any other findings/tests write)
 - [ ] Diagnosis Agree/Update/Fully-change buttons and the generate button don't interfere with each other — both write to the same `Assessment`, and the UI reflects whichever ran last
 
 **Error handling**
@@ -439,15 +455,29 @@ data, since it's Postgres-backed now.
 
 ## Troubleshooting
 
-**"Generate with AI" button shows a red error / `POST .../diagnosis/generate` returns `502`**
+**PTee Assistant shows a red error / `POST .../diagnosis/generate` returns `502`**
 Almost always `ANTHROPIC_API_KEY` isn't set. Check the exact error text
-returned in the response body (or the red text under the button) —
-`"ANTHROPIC_API_KEY is not configured"` means the key is missing entirely
-(set it in `backend/.env`, see Environment files above, then restart the
-backend); any other message is a real upstream failure (bad key, network,
-rate limit, Anthropic outage) surfaced as-is from the `anthropic` SDK. This
-is the *only* endpoint in the app that depends on an external service —
+returned in the response body (or the red text under the confidence meter,
+with a "Retry" link) — `"ANTHROPIC_API_KEY is not configured"` means the
+key is missing entirely (set it in `backend/.env`, see Environment files
+above, then restart the backend); any other message is a real upstream
+failure (bad key, network, rate limit, Anthropic outage) surfaced as-is
+from the `anthropic` SDK. Diagnosis generation and test recommendations
+are the *only* things in the app that depend on an external service —
 everything else keeps working normally regardless.
+
+**Every assessment page load now makes a real Claude API call — expect it, don't chase it as a bug**
+Diagnosis generation is automatic (no more manual "Generate with AI"
+button) — it fires once whenever `/assessment/{id}` mounts, and again
+every time a test is completed. This means simply opening or refreshing
+an assessment screen during development will call the real Anthropic API
+if `ANTHROPIC_API_KEY` is set, consuming quota each time — including on
+the demo `/assessment` route, which will overwrite its seeded fixture
+diagnosis ("Load-related right anterior knee pain," 64%) with a freshly
+generated one the first time it's viewed after this change. If you want
+to avoid burning API calls while doing unrelated frontend work, unset
+`ANTHROPIC_API_KEY` locally (you'll just see the inline error/Retry state
+instead, which is also useful for testing that path).
 
 **`"Assessment rules file not found"` / `"Recommendation rules file not found"` in a `502` response**
 `backend/app/services/engines/assessment_rules.md` or `recommendation_rules.md`

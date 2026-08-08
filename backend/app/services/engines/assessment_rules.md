@@ -12,12 +12,13 @@
 > "Generate with AI" call, no backend restart needed.
 >
 > For the *recommended-assessment-batch* spec (up to 4 ranked tests per
-> call, each independently confidence-scored, Test Name / Summary / Why
-> Recommended / Confidence format), see
-> [`recommendation_rules.md`](recommendation_rules.md) in this same folder
-> — sent to Claude by `recommendation_engine.py` (`ClaudeRecommendationEngine`)
-> on every `POST /assessments/{id}/recommendations` call, shown as a
-> review feed (Accept/Reject) inside the PTee Assistant panel.
+> call, Test Name / Test Type / Summary / Why Recommended format — no
+> per-test confidence, only the overall diagnosis confidence above is
+> shown anywhere), see [`recommendation_rules.md`](recommendation_rules.md)
+> in this same folder — sent to Claude by `recommendation_engine.py`
+> (`ClaudeRecommendationEngine`) on every
+> `POST /assessments/{id}/recommendations` call, shown as a review feed
+> (Delete, or record findings to complete) inside the PTee Assistant panel.
 
 ## 1. Role & Scope
 

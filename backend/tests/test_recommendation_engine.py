@@ -32,9 +32,9 @@ def test_recommend_includes_both_rules_files_in_system_prompt(monkeypatch):
         tests=[
             RecommendedTest(
                 test_name="Hip Internal Rotation",
+                test_type="joint",
                 summary="Anterior pelvic tilt with suspected hip restriction",
                 why_recommended="Checks whether hip restriction contributes to the anterior knee pain pattern.",
-                confidence=82,
             )
         ],
     )
